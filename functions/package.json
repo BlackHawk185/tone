@@ -1,0 +1,16 @@
+{
+  "name": "tone-functions",
+  "version": "1.0.0",
+  "description": "Firebase Cloud Functions for Tone dispatch app",
+  "main": "src/index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "deploy": "firebase deploy --only functions"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.2.0",
+    "firebase-functions": "^5.1.0"
+  }
+}
