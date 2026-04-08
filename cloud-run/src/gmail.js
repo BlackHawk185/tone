@@ -18,43 +18,13 @@ async function fetchAndMarkUnread() {
   const auth = createOAuth2Client();
   const gmail = google.gmail({ version: 'v1', auth });
 
-  // Log which account we're using
-  try {
-    const profile = await gmail.users.getProfile({ userId: 'me' });
-    console.log(`[Gmail] Authenticated as: ${profile.data.emailAddress}`);
-  } catch (e) {
-    console.log(`[Gmail] Could not get profile: ${e.message}`);
-  }
-
   const list = await gmail.users.messages.list({
     userId: 'me',
     q: 'is:unread in:inbox',
     maxResults: 20,
   });
 
-  if (!list.data.messages?.length) {
-    // Debug: show recent inbox messages
-    try {
-      const recent = await gmail.users.messages.list({
-        userId: 'me',
-        q: 'in:inbox',
-        maxResults: 5,
-      });
-      if (recent.data.messages?.length) {
-        for (const { id } of recent.data.messages.slice(0, 3)) {
-          const m = await gmail.users.messages.get({ userId: 'me', id, format: 'metadata', metadataHeaders: ['Subject'] });
-          const subj = m.data.payload?.headers?.find(h => h.name === 'Subject')?.value || '(no subject)';
-          const labels = (m.data.labelIds || []).join(',');
-          console.log(`[Gmail] Recent msg: "${subj}" [${labels}]`);
-        }
-      } else {
-        console.log('[Gmail] Inbox is completely empty.');
-      }
-    } catch (e) {
-      console.log(`[Gmail] Debug listing error: ${e.message}`);
-    }
-    return [];
-  }
+  if (!list.data.messages?.length) return [];
 
   const results = [];
   for (const { id } of list.data.messages) {
