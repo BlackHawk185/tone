@@ -2,7 +2,7 @@ require('dotenv').config();
 const http = require('http');
 const { parseDispatchEmail } = require('./emailParser');
 const { writeIncident } = require('./firestore');
-const { fetchAndMarkUnread, registerWatch } = require('./gmail');
+const { fetchAndMarkUnread, fetchRecent, registerWatch } = require('./gmail');
 
 const PORT = process.env.PORT || 8080;
 const PUSH_SECRET = process.env.PUSH_SECRET || '';
@@ -73,6 +73,39 @@ const server = http.createServer((req, res) => {
     res.writeHead(204);
     res.end();
     processNewMessages().catch(err => console.error('[Push] Error:', err.message));
+    return;
+  }
+
+  // Force reprocess recent messages (regardless of read status)
+  if (req.method === 'POST' && req.url === `/force-process/${PUSH_SECRET}`) {
+    (async () => {
+      try {
+        const messages = await fetchRecent(5);
+        if (!messages.length) {
+          res.writeHead(200, { 'Content-Type': 'text/plain' });
+          res.end('No messages in inbox.');
+          return;
+        }
+        const results = [];
+        for (const { subject, raw } of messages) {
+          console.log(`[Force] Processing: "${subject}"`);
+          const body = extractPlainText(raw);
+          const incident = parseDispatchEmail(subject, body);
+          if (incident) {
+            await writeIncident(incident);
+            results.push(`OK: ${subject} → ${incident.incidentId} (final=${incident.isFinal})`);
+          } else {
+            results.push(`SKIP: ${subject}`);
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end(results.join('\n'));
+      } catch (err) {
+        console.error('[Force] Error:', err.message);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Error: ' + err.message);
+      }
+    })();
     return;
   }
 

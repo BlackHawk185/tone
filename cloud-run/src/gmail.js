@@ -105,4 +105,37 @@ async function registerWatch() {
   return response.data;
 }
 
-module.exports = { fetchAndMarkUnread, registerWatch };
+/**
+ * Fetch recent inbox messages regardless of read status (for reprocessing).
+ */
+async function fetchRecent(maxResults = 5) {
+  const auth = createOAuth2Client();
+  const gmail = google.gmail({ version: 'v1', auth });
+
+  const list = await gmail.users.messages.list({
+    userId: 'me',
+    q: 'in:inbox',
+    maxResults,
+  });
+
+  if (!list.data.messages?.length) return [];
+
+  const results = [];
+  for (const { id } of list.data.messages) {
+    const msg = await gmail.users.messages.get({
+      userId: 'me',
+      id,
+      format: 'raw',
+    });
+
+    const raw = Buffer.from(msg.data.raw, 'base64url').toString('utf-8');
+    const subjectMatch = raw.match(/^Subject:\s*(.+)$/im);
+    const subject = subjectMatch ? subjectMatch[1].trim() : '(no subject)';
+
+    results.push({ id, subject, raw });
+  }
+
+  return results;
+}
+
+module.exports = { fetchAndMarkUnread, fetchRecent, registerWatch };
