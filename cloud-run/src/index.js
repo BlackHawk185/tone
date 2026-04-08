@@ -93,7 +93,10 @@ server.listen(PORT, () => {
   // Register watch on startup
   registerWatch().catch(err => console.error('[Watch] Startup error:', err.message));
   // Process anything unread that arrived while we were offline/deploying
-  processNewMessages().catch(err => console.error('[Startup] Error:', err.message));
+  // Delay startup processing to avoid racing with deployment health checks
+  setTimeout(() => {
+    processNewMessages().catch(err => console.error('[Startup] Error:', err.message));
+  }, 5000);
 });
 
 
