@@ -130,8 +130,11 @@ function parseDispatchEmail(subject, body) {
   const dispatchTime = parseTimestamp(dtMatch ? dtMatch[1] : null) || new Date().toISOString();
 
   // --- Is Final ---
-  // A "Final" Rip & Run appears as "Report Time: M/D/YYYY H:mm:ss Final"
-  const isFinal = /Report\s+Time\s*:.*\bFinal\b/i.test(text);
+  // A "Final" Rip & Run can appear as:
+  //   - "Report Time: M/D/YYYY H:mm:ss Final" in the body
+  //   - "Final" in the subject line (e.g. "LCFD #5 Rip & Run Final")
+  const isFinal = /Report\s+Time\s*:.*\bFinal\b/i.test(text)
+    || /\bFinal\b/i.test(subject);
 
   return {
     incidentId,

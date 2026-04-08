@@ -48,10 +48,10 @@ async function writeIncident(incident) {
     // First time we've seen this incident — create it
     await docRef.set({
       ...dispatchFields,
-      status:    'active',
+      status:    incident.isFinal ? 'inactive' : 'active',
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    console.log(`[Firestore] Incident ${incident.incidentId} created.`);
+    console.log(`[Firestore] Incident ${incident.incidentId} created${incident.isFinal ? ' (Final)' : ''}.`);
   } else {
     // Update all dispatch fields; preserve responders and createdAt.
     // If this is a Final Rip & Run, force status to 'inactive'.
