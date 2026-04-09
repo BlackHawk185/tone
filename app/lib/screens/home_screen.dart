@@ -4,17 +4,19 @@ import 'package:go_router/go_router.dart';
 import 'package:tone/models/incident.dart';
 import 'package:tone/models/response_role.dart';
 import 'package:tone/models/on_call_entry.dart';
+import 'package:tone/models/user_status.dart';
 import 'package:tone/services/auth_service.dart';
 import 'package:tone/services/incident_service.dart';
 import 'package:tone/services/location_service.dart';
 import 'package:tone/services/on_call_service.dart';
+import 'package:tone/services/user_status_service.dart';
 import 'package:tone/utils/incident_theme.dart';
 import 'package:tone/utils/map_launcher.dart';
 import 'package:tone/widgets/bounce_on_change.dart';
 import 'package:tone/widgets/info_tile.dart';
 import 'package:tone/widgets/live_elapsed.dart';
 import 'package:tone/widgets/pulsing_dot.dart';
-import 'package:tone/widgets/settings_menu.dart';
+import 'package:tone/widgets/settings_menu.dart' show SettingsMenu, statusIcon;
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -35,97 +37,153 @@ class HomeScreen extends StatelessWidget {
                 StreamBuilder<List<OnCallEntry>>(
                   stream: OnCallService.watchOnCall(),
                   builder: (context, onCallSnap) {
-                    final onCall = onCallSnap.data ?? [];
-                    if (onCall.isEmpty) return const SizedBox.shrink();
-                    return Container(
-                      width: double.infinity,
-                      color: Colors.green.withAlpha(25),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SingleChildScrollView(
+                    return StreamBuilder<List<UserStatus>>(
+                      stream: UserStatusService.watchAllStatuses(),
+                      builder: (context, statusSnap) {
+                        final onCall = onCallSnap.data ?? [];
+                        final statuses = statusSnap.data ?? [];
+                        if (onCall.isEmpty && statuses.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
+                        return Container(
+                          width: double.infinity,
+                          color: Colors.green.withAlpha(25),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          child: SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             child: Row(
-                              children: onCall.map((e) {
-                                final shiftEnd = DateTime.tryParse(e.shiftEnd);
-                                return Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: Colors.teal.withAlpha(20),
-                                      border: Border.all(color: Colors.teal.withAlpha(60), width: 1),
-                                      borderRadius: const BorderRadius.all(Radius.circular(12)),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(_roleIcon(e.role), size: 14, color: Colors.teal),
-                                            const SizedBox(width: 6),
-                                            Text.rich(
-                                              TextSpan(
-                                                children: [
-                                                  TextSpan(
-                                                    text: e.displayName,
+                              children: [
+                                // On-call entries
+                                ...onCall.map((e) {
+                                  final shiftEnd = DateTime.tryParse(e.shiftEnd);
+                                  return Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.teal.withAlpha(20),
+                                        border: Border.all(color: Colors.teal.withAlpha(60), width: 1),
+                                        borderRadius: const BorderRadius.all(Radius.circular(12)),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(_roleIcon(e.role), size: 14, color: Colors.teal),
+                                              const SizedBox(width: 6),
+                                              Text.rich(
+                                                TextSpan(
+                                                  children: [
+                                                    TextSpan(
+                                                      text: e.displayName,
+                                                      style: TextStyle(
+                                                        fontWeight: FontWeight.w700,
+                                                        fontSize: 13,
+                                                        color: Colors.green.shade200,
+                                                      ),
+                                                    ),
+                                                    TextSpan(
+                                                      text: ' - on call',
+                                                      style: TextStyle(
+                                                        fontWeight: FontWeight.w500,
+                                                        fontSize: 11,
+                                                        color: Colors.green.shade600,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              if (e.role.isNotEmpty)
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.teal.withAlpha(40),
+                                                    borderRadius: const BorderRadius.all(Radius.circular(6)),
+                                                  ),
+                                                  child: Text(
+                                                    e.role.toUpperCase(),
                                                     style: TextStyle(
                                                       fontWeight: FontWeight.w700,
-                                                      fontSize: 13,
-                                                      color: Colors.green.shade200,
+                                                      fontSize: 8,
+                                                      color: Colors.teal,
+                                                      letterSpacing: 0.3,
                                                     ),
                                                   ),
-                                                  TextSpan(
-                                                    text: ' - on call',
-                                                    style: TextStyle(
-                                                      fontWeight: FontWeight.w500,
-                                                      fontSize: 11,
-                                                      color: Colors.green.shade600,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            if (e.role.isNotEmpty)
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.teal.withAlpha(40),
-                                                  borderRadius: const BorderRadius.all(Radius.circular(6)),
                                                 ),
-                                                child: Text(
-                                                  e.role.toUpperCase(),
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.w700,
-                                                    fontSize: 8,
-                                                    color: Colors.teal,
-                                                    letterSpacing: 0.3,
-                                                  ),
-                                                ),
-                                              ),
-                                            if (e.role.isNotEmpty && shiftEnd != null)
-                                              const SizedBox(width: 5),
-                                            if (shiftEnd != null)
-                                              _ShiftCountdown(shiftEnd: shiftEnd),
-                                          ],
-                                        ),
-                                      ],
+                                              if (e.role.isNotEmpty && shiftEnd != null)
+                                                const SizedBox(width: 5),
+                                              if (shiftEnd != null)
+                                                _ShiftCountdown(shiftEnd: shiftEnd),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                );
-                              }).toList(),
+                                  );
+                                }),
+                                // Custom status entries
+                                ...statuses.map((s) {
+                                  return Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.amber.withAlpha(20),
+                                        border: Border.all(color: Colors.amber.withAlpha(60), width: 1),
+                                        borderRadius: const BorderRadius.all(Radius.circular(12)),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(statusIcon(s.label), size: 14, color: Colors.amber.shade600),
+                                              const SizedBox(width: 6),
+                                              Text.rich(
+                                                TextSpan(
+                                                  children: [
+                                                    TextSpan(
+                                                      text: s.displayName,
+                                                      style: TextStyle(
+                                                        fontWeight: FontWeight.w700,
+                                                        fontSize: 13,
+                                                        color: Colors.amber.shade200,
+                                                      ),
+                                                    ),
+                                                    TextSpan(
+                                                      text: ' - ${s.label}',
+                                                      style: TextStyle(
+                                                        fontWeight: FontWeight.w600,
+                                                        fontSize: 11,
+                                                        color: Colors.amber.shade600,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 3),
+                                          _ShiftCountdown(shiftEnd: s.expiresAt, color: Colors.amber.shade600),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
+                        );
+                      },
                     );
                   },
                 ),
@@ -568,7 +626,8 @@ IconData _roleIcon(String role) {
 
 class _ShiftCountdown extends StatefulWidget {
   final DateTime shiftEnd;
-  const _ShiftCountdown({required this.shiftEnd});
+  final Color? color;
+  const _ShiftCountdown({required this.shiftEnd, this.color});
 
   @override
   State<_ShiftCountdown> createState() => _ShiftCountdownState();
@@ -612,7 +671,7 @@ class _ShiftCountdownState extends State<_ShiftCountdown> {
         fontFamily: 'monospace',
         fontWeight: FontWeight.w700,
         fontSize: 11,
-        color: Colors.green.shade500,
+        color: widget.color ?? Colors.green.shade500,
         letterSpacing: 0.5,
       ),
     );
