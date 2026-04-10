@@ -1,6 +1,8 @@
+import 'dart:io' show Platform;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tone/models/user_status.dart';
@@ -12,10 +14,17 @@ class SettingsMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      icon: const Icon(Icons.settings),
-      tooltip: 'Settings',
-      onPressed: () => _showSettingsModal(context),
+    return GestureDetector(
+      onTap: () => _showSettingsModal(context),
+      child: Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade700,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Icon(Icons.settings, color: Colors.white, size: 28),
+      ),
     );
   }
 
@@ -39,11 +48,22 @@ class _SettingsSheet extends StatefulWidget {
 }
 
 class _SettingsSheetState extends State<_SettingsSheet> {
+  /// Flip to true to show the "Test Dispatch" button in settings.
+  static const _debugMode = true;
+
   static const _topics = {
     'dispatch_fire': 'Fire Calls',
     'dispatch_ems': 'EMS Calls',
     'priority_messages': 'Priority Traffic',
     'messages': 'Messages',
+  };
+
+  // Android notification channel IDs → display info
+  static const _channelSounds = {
+    'dispatch_fire':      _ChannelInfo('Fire Dispatch', Icons.local_fire_department),
+    'dispatch_ems':       _ChannelInfo('EMS Dispatch', Icons.medical_services),
+    'priority_messages':  _ChannelInfo('Priority Traffic', Icons.warning_amber),
+    'messages':           _ChannelInfo('General Messages', Icons.message),
   };
 
   final Map<String, bool> _subscriptions = {};
@@ -55,10 +75,20 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     _loadPrefs();
   }
 
+  bool get _isAndroid => !kIsWeb && Platform.isAndroid;
+
   Future<void> _loadPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    for (final topic in _topics.keys) {
-      _subscriptions[topic] = prefs.getBool('topic_$topic') ?? true;
+    if (_isAndroid) {
+      // Android: force-subscribe to all topics, no user toggle
+      for (final topic in _topics.keys) {
+        _subscriptions[topic] = true;
+        await FirebaseMessaging.instance.subscribeToTopic(topic);
+      }
+    } else {
+      final prefs = await SharedPreferences.getInstance();
+      for (final topic in _topics.keys) {
+        _subscriptions[topic] = prefs.getBool('topic_$topic') ?? true;
+      }
     }
     if (mounted) setState(() => _loaded = true);
   }
@@ -75,11 +105,34 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     }
   }
 
+  static const _settingsChannel = MethodChannel('com.valence.tone/settings');
+
+  Future<void> _openChannelSettings(String channelId) async {
+    try {
+      await _settingsChannel.invokeMethod('openChannelSettings', {
+        'channelId': channelId,
+      });
+    } catch (e) {
+      debugPrint('[Settings] Could not open channel settings: $e');
+    }
+  }
+
+  Future<void> _sendTestDispatch() async {
+    // 10 second delay so you can lock the screen
+    debugPrint('[Settings] Test dispatch will fire in 10 seconds...');
+    await Future.delayed(const Duration(seconds: 10));
+    try {
+      await _settingsChannel.invokeMethod('sendTestDispatch');
+    } catch (e) {
+      debugPrint('[Settings] Error sending test dispatch: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = AuthService.currentUser;
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -146,19 +199,56 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               ),
             ),
             const SizedBox(height: 4),
-            if (!_loaded)
+            // Android: manage notifications at the OS channel level only
+            if (_isAndroid) ...[
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              )
-            else
-              ..._topics.entries.map((e) => SwitchListTile(
+                padding: EdgeInsets.only(top: 2, bottom: 4),
+                child: Text(
+                  'Tap to manage sound, vibration & visibility',
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ),
+              ..._channelSounds.entries.map((e) => ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    title: Text(e.value),
-                    value: _subscriptions[e.key] ?? true,
-                    onChanged: (v) => _toggle(e.key, v),
+                    leading: Icon(e.value.icon, size: 20),
+                    title: Text(e.value.label, style: const TextStyle(fontSize: 14)),
+                    trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                    onTap: () => _openChannelSettings(e.key),
                   )),
+            ]
+            // iOS / web: in-app topic toggles
+            else ...[
+              if (!_loaded)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                )
+              else
+                ..._topics.entries.map((e) => SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(e.value),
+                      value: _subscriptions[e.key] ?? true,
+                      onChanged: (v) => _toggle(e.key, v),
+                    )),
+            ],
+            const Divider(),
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.notifications_active),
+              title: const Text('Alert Profiles'),
+              subtitle: const Text(
+                'Customize sound & vibration patterns',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+              onTap: () {
+                Navigator.pop(context);
+                context.go('/alert-profiles');
+              },
+            ),
             const Divider(),
             ListTile(
               dense: true,
@@ -170,6 +260,43 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 // TODO: implement share
               },
             ),
+            const Divider(),
+            if (_debugMode) ...[                          
+              const Text(
+                'DEBUG',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 4),
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.bug_report, color: Colors.orange),
+                title: const Text('Send Test Dispatch'),
+                subtitle: const Text(
+                  'Triggers a fake dispatch alert via debug channel',
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _sendTestDispatch();
+                },
+              ),
+              if (_isAndroid)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.notifications_none, size: 20),
+                  title: const Text('Debug Channel Settings', style: TextStyle(fontSize: 14)),
+                  trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                  onTap: () => _openChannelSettings('debug'),
+                ),
+              const Divider(),
+            ],
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
@@ -191,9 +318,18 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   void _showSetStatusDialog(BuildContext context) {
     showDialog(
       context: context,
+      useRootNavigator: false,
       builder: (ctx) => const _SetStatusDialog(),
     );
   }
+}
+
+// ── Channel info for notification sound settings ──
+
+class _ChannelInfo {
+  final String label;
+  final IconData icon;
+  const _ChannelInfo(this.label, this.icon);
 }
 
 // ── Active status tile shown in settings when a status is set ──
@@ -301,7 +437,17 @@ class _SetStatusDialogState extends State<_SetStatusDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Set Status'),
+      title: Row(
+        children: [
+          const Expanded(child: Text('Set Status')),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.pop(context),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -380,10 +526,6 @@ class _SetStatusDialogState extends State<_SetStatusDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
         FilledButton(
           onPressed: (_label.isEmpty || _hours == null)
               ? null

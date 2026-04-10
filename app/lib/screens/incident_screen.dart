@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show FontFeature, HapticFeedback;
+import 'package:flutter/services.dart' show HapticFeedback, SystemChrome, SystemUiMode;
 import 'package:tone/models/incident.dart';
 import 'package:tone/models/responder_status.dart';
 import 'package:tone/models/response_role.dart';
@@ -61,11 +61,13 @@ class _IncidentDetailState extends State<_IncidentDetail> {
   void initState() {
     super.initState();
     _startLocationUpdates();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
   @override
   void dispose() {
     _locationTimer?.cancel();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
@@ -106,18 +108,25 @@ class _IncidentDetailState extends State<_IncidentDetail> {
     final nowActive = incident.isActive;
     final confirmed = await showDialog<bool>(
       context: context,
+      useRootNavigator: false,
       builder: (_) => AlertDialog(
-        title: Text(nowActive ? 'Close Incident?' : 'Reopen Incident?'),
+        title: Row(
+          children: [
+            Expanded(child: Text(nowActive ? 'Close Incident?' : 'Reopen Incident?')),
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(context, false),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
+          ],
+        ),
         content: Text(
           nowActive
               ? 'Mark this incident as closed. Responders can still view it.'
               : 'Mark this incident as active again.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: Text(nowActive ? 'Close' : 'Reopen'),
@@ -170,93 +179,87 @@ class _IncidentDetailState extends State<_IncidentDetail> {
   Widget build(BuildContext context) {
     final incident = widget.incident;
     final theme = IncidentTheme.of(incident.incidentType);
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Type tile (expandable → call details) ─────────────────
-          _CallDetailsCard(
-            incident: incident,
-            theme: theme,
-            expanded: _callDetailsExpanded,
-            onToggle: () => setState(() => _callDetailsExpanded = !_callDetailsExpanded),
-          ),
-          const SizedBox(height: 10),
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Info tiles (2-column grid, type card first) ───────────
+                _InfoGrid(cardExpanded: _callDetailsExpanded, children: [
+                      _CallDetailsCard(
+                        incident: incident,
+                        theme: theme,
+                        expanded: _callDetailsExpanded,
+                        onToggle: () => setState(() => _callDetailsExpanded = !_callDetailsExpanded),
+                        onLongPress: () => _toggleActiveStatus(context),
+                      ),
+                      InfoTile(
+                        icon: Icons.location_on,
+                        color: Colors.orange,
+                        label: 'ADDRESS',
+                        value: incident.crossStreets != null
+                            ? '${incident.address}\n${incident.crossStreets}'
+                            : incident.address,
+                        onTap: incident.lat != null && incident.lng != null
+                            ? () => openMap(incident.lat!, incident.lng!)
+                            : null,
+                      ),
+                      LiveElapsed(dispatchTime: incident.dispatchTime),
+                      if (incident.priority != null)
+                        InfoTile(
+                          icon: Icons.flag,
+                          color: Colors.red,
+                          label: 'PRIORITY',
+                          value: 'P${incident.priority}',
+                        ),
+                ]),
 
-          // ── Info tiles (2-column grid) ─────────────────────────────
-          _InfoGrid(children: [
-                InfoTile(
-                  icon: incident.isActive ? Icons.radio_button_checked : Icons.radio_button_off,
-                  color: incident.isActive ? Colors.teal : Colors.grey,
-                  label: 'ACTIVE',
-                  value: incident.isActive ? 'ACTIVE' : 'CLOSED',
-                  onTap: () => _toggleActiveStatus(context),
-                ),
-                InfoTile(
-                  icon: Icons.location_on,
-                  color: Colors.orange,
-                  label: 'ADDRESS',
-                  value: incident.crossStreets != null
-                      ? '${incident.address}\n${incident.crossStreets}'
-                      : incident.address,
-                  onTap: incident.lat != null && incident.lng != null
-                      ? () => openMap(incident.lat!, incident.lng!)
-                      : null,
-                ),
-                LiveElapsed(dispatchTime: incident.dispatchTime),
-                if (incident.priority != null)
-                  InfoTile(
-                    icon: Icons.flag,
-                    color: Colors.red,
-                    label: 'PRIORITY',
-                    value: 'P${incident.priority}',
-                  ),
-          ]),
-
-          // ── Apparatus (single row) ──────────────────────────────────
-          if (incident.units.isNotEmpty) ...[
-            const SizedBox(height: 28),
-            Text('APPARATUS',
-                style: TextStyle(fontSize: 12, color: Colors.grey[500], letterSpacing: 1.5)),
-            const SizedBox(height: 10),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: incident.units.map((unit) {
-                  final idx = incident.units.indexOf(unit);
-                  return Padding(
-                    padding: EdgeInsets.only(left: idx > 0 ? 10 : 0),
-                    child: InfoTile(
-                      icon: Icons.local_fire_department,
-                      color: Colors.blueGrey,
-                      label: 'UNIT',
-                      value: unit,
+                // ── Apparatus (single row) ──────────────────────────────────
+                if (incident.units.isNotEmpty) ...[
+                  const SizedBox(height: 28),
+                  Text('APPARATUS',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500], letterSpacing: 1.5)),
+                  const SizedBox(height: 10),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: incident.units.map((unit) {
+                        final idx = incident.units.indexOf(unit);
+                        return Padding(
+                          padding: EdgeInsets.only(left: idx > 0 ? 10 : 0),
+                          child: InfoTile(
+                            icon: Icons.local_fire_department,
+                            color: Colors.blueGrey,
+                            label: 'UNIT',
+                            value: unit,
+                          ),
+                        );
+                      }).toList(),
                     ),
-                  );
-                }).toList(),
-              ),
+                  ),
+                ],
+
+                const SizedBox(height: 28),
+
+                // ── Role groups with nested responders ──────────────────────────
+                _RoleGroups(incident: incident),
+              ],
             ),
-          ],
-
-          const SizedBox(height: 28),
-
-          // ── Role groups with nested responders ──────────────────────────
-          _RoleGroups(incident: incident),
-
-          const SizedBox(height: 28),
-
-          // ── Response ───────────────────────────────────────────────────
-          Text('MY RESPONSE',
-              style: TextStyle(fontSize: 12, color: Colors.grey[500], letterSpacing: 1.5)),
-          const SizedBox(height: 10),
-          _SwipeToRespond(
+          ),
+        ),
+        // ── Response (pinned to bottom) ──────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: _SwipeToRespond(
             active: _isResponding,
             updating: _updating,
             onRespond: () => _toggleResponse(),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -277,9 +280,7 @@ class _RoleGroups extends StatelessWidget {
     // Group responders by role
     final respondersByRole = <String, List<ResponderStatus>>{};
     for (final r in incident.responders.values) {
-      if (r.role != null) {
-        respondersByRole.putIfAbsent(r.role!, () => []).add(r);
-      }
+      respondersByRole.putIfAbsent(r.role, () => []).add(r);
     }
 
     // Sort responders within each role by response time
@@ -299,7 +300,6 @@ class _RoleGroups extends StatelessWidget {
           return hasFilled || isResponding;
         }).map((role) {
           final responders = respondersByRole[role.id] ?? [];
-          final isMine = myStatus?.role == role.id;
           final vacant = responders.isEmpty;
 
           return Padding(
@@ -493,117 +493,140 @@ class _CallDetailsCard extends StatelessWidget {
   final dynamic theme; // IncidentTheme
   final bool expanded;
   final VoidCallback onToggle;
+  final VoidCallback onLongPress;
 
   const _CallDetailsCard({
     required this.incident,
     required this.theme,
     required this.expanded,
     required this.onToggle,
+    required this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
     final hasNarrative = incident.narrative.isNotEmpty;
 
-    return Card(
-      color: theme.color,
-      clipBehavior: Clip.antiAlias,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+      decoration: BoxDecoration(
+        color: theme.color.withAlpha(25),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: theme.color.withAlpha(80), width: 1),
+      ),
       child: InkWell(
+        borderRadius: BorderRadius.circular(10),
         onTap: hasNarrative ? onToggle : null,
+        onLongPress: onLongPress,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // ── Always visible: type + nature of call ──
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Icon(theme.icon, color: Colors.white, size: 16),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Icon(theme.icon, color: theme.color, size: 14),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: incident.incidentType,
+                          style: TextStyle(
+                            color: theme.color,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                        if (incident.natureOfCall != null)
                           TextSpan(
-                            text: incident.incidentType,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14,
-                              letterSpacing: 0.4,
+                            text: '\n${incident.natureOfCall}',
+                            style: TextStyle(
+                              color: Colors.white.withAlpha(200),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w400,
                             ),
                           ),
-                          if (incident.natureOfCall != null)
-                            TextSpan(
-                              text: ' — ${incident.natureOfCall}',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                        ],
-                      ),
+                      ],
                     ),
                   ),
-                  if (hasNarrative)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Icon(
-                        expanded ? Icons.expand_less : Icons.expand_more,
-                        color: Colors.white70,
-                        size: 20,
-                      ),
-                    ),
-                ],
-              ),
+                ),
+                if (hasNarrative)
+                  AnimatedRotation(
+                    turns: expanded ? 0.5 : 0.0,
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeInOut,
+                    child: Icon(Icons.expand_more, color: theme.color.withAlpha(180), size: 18),
+                  ),
+              ],
             ),
 
             // ── Expandable: narrative only ──
             if (hasNarrative)
               AnimatedSize(
-                duration: const Duration(milliseconds: 200),
+                duration: const Duration(milliseconds: 220),
                 curve: Curves.easeInOut,
-                child: expanded
-                    ? Container(
-                        color: Theme.of(context).colorScheme.surface,
-                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+                child: SizedBox(
+                  height: expanded ? null : 0,
+                  child: AnimatedOpacity(
+                    opacity: expanded ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 160),
+                    child: Container(
+                        margin: const EdgeInsets.only(top: 6),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text('NARRATIVE',
                                 style: TextStyle(
-                                  fontSize: 10,
+                                  fontSize: 9,
                                   color: Colors.grey[500],
                                   letterSpacing: 1.4,
                                   fontWeight: FontWeight.w600,
                                 )),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 6),
                             ...incident.narrative.map((entry) => Padding(
                                   padding: const EdgeInsets.only(bottom: 8),
                                   child: Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        _formatNarrativeTime(entry.time),
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.grey[400],
-                                          fontWeight: FontWeight.w600,
-                                          fontFeatures: const [FontFeature.tabularFigures()],
-                                        ),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Text(
+                                            _formatNarrativeTime(entry.time),
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.grey[400],
+                                              fontWeight: FontWeight.w600,
+                                              fontFeatures: const [FontFeature.tabularFigures()],
+                                            ),
+                                          ),
+                                          if (entry.author.isNotEmpty)
+                                            Text(
+                                              entry.author,
+                                              style: TextStyle(
+                                                fontSize: 9,
+                                                color: Colors.grey[600],
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
                                           entry.text,
-                                          style: const TextStyle(fontSize: 13),
+                                          style: const TextStyle(fontSize: 12),
                                         ),
                                       ),
                                     ],
@@ -611,8 +634,9 @@ class _CallDetailsCard extends StatelessWidget {
                                 )),
                           ],
                         ),
-                      )
-                    : const SizedBox.shrink(),
+                      ),
+                  ),
+                ),
               ),
           ],
         ),
@@ -635,12 +659,41 @@ class _CallDetailsCard extends StatelessWidget {
 // ── Info grid (2-column layout) ──────────────────────────────────────────────
 class _InfoGrid extends StatelessWidget {
   final List<Widget> children;
-  const _InfoGrid({required this.children});
+  final bool cardExpanded;
+  const _InfoGrid({required this.children, this.cardExpanded = false});
 
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final cols = width < 400 ? 1 : 2;
+
+    // When card is expanded: type card fills left, all others stack on right
+    if (cardExpanded && cols == 2 && children.length > 1) {
+      final others = children.skip(1).toList();
+      return IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: children[0]),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (int i = 0; i < others.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 10),
+                    others[i],
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Normal 2-per-row grid
     final List<Widget> rows = [];
     for (int i = 0; i < children.length; i += cols) {
       if (cols == 1) {
@@ -828,118 +881,5 @@ class _SwipeToRespondState extends State<_SwipeToRespond>
   }
 }
 
-// ── Role slots: deficit-based view of what the incident needs ─────────────────
-class _RoleSlots extends StatelessWidget {
-  final Incident incident;
-  const _RoleSlots({required this.incident});
 
-  @override
-  Widget build(BuildContext context) {
-    final roles = ResponseRole.rolesForType(incident.incidentType);
-    final responders = incident.responders;
-    final uid = AuthService.currentUser?.uid;
-    final myStatus = uid != null ? responders[uid] : null;
-    final isResponding = myStatus != null;
-
-    // Build a map of roleId → responder who filled it
-    final filled = <String, ResponderStatus>{};
-    for (final r in responders.values) {
-      if (r.role != null) filled[r.role!] = r;
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('ROLES',
-            style: TextStyle(fontSize: 12, color: Colors.grey[500], letterSpacing: 1.5)),
-        const SizedBox(height: 10),
-        ...roles.map((role) {
-          final holder = filled[role.id];
-          final isMine = holder?.uid == uid;
-          final vacant = holder == null;
-
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: (isResponding && vacant && !isMine)
-                    ? () => _claimRole(context, role.id)
-                    : null,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: vacant
-                        ? Colors.blueGrey.withAlpha(15)
-                        : Colors.teal.withAlpha(20),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: vacant
-                          ? Colors.blueGrey.withAlpha(60)
-                          : Colors.teal.withAlpha(80),
-                      width: 1,
-                    ),
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  child: Row(
-                    children: [
-                      Icon(
-                        role.icon,
-                        size: 20,
-                        color: vacant ? Colors.blueGrey : Colors.teal,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              role.label,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                                color: vacant ? Colors.blueGrey : Colors.teal,
-                                letterSpacing: 0.3,
-                              ),
-                            ),
-                            if (!vacant)
-                              Text(
-                                holder!.displayName + (isMine ? ' (you)' : ''),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.teal.withAlpha(180),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      if (vacant)
-                        Icon(
-                          isResponding ? Icons.add_circle_outline : Icons.circle_outlined,
-                          size: 18,
-                          color: Colors.blueGrey.withAlpha(isResponding ? 150 : 60),
-                        )
-                      else
-                        const Icon(Icons.check_circle, size: 18, color: Colors.teal),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          );
-        }),
-      ],
-    );
-  }
-
-  Future<void> _claimRole(BuildContext context, String roleId) async {
-    final uid = AuthService.currentUser?.uid;
-    if (uid == null) return;
-    await ResponseService.updateRole(
-      incidentId: incident.incidentId,
-      uid: uid,
-      role: roleId,
-    );
-  }
-}
 

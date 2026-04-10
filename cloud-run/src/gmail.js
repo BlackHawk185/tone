@@ -15,12 +15,8 @@ function getGmail() {
   return _gmail;
 }
 
-// In-memory last-seen historyId. Seeded on first watch registration.
-let lastHistoryId = null;
-
 /**
- * Register Gmail push notifications. Returns the current historyId
- * which seeds our tracking so we only process *new* changes.
+ * Register Gmail push notifications (called by Cloud Scheduler).
  */
 async function registerWatch() {
   const gmail = getGmail();
@@ -31,65 +27,16 @@ async function registerWatch() {
       topicName: process.env.PUBSUB_TOPIC,
     },
   });
-  lastHistoryId = res.data.historyId;
   const expiry = new Date(Number(res.data.expiration)).toISOString();
-  console.log(`[Watch] Registered. historyId=${lastHistoryId}, expires=${expiry}`);
+  console.log(`[Watch] Registered. expires=${expiry}`);
   return res.data;
 }
 
 /**
- * Given a historyId from a Pub/Sub push, fetch only the messages that
- * were added to the INBOX since our last checkpoint.
- * Returns raw RFC 2822 strings for each new message.
+ * Fetch recent unread inbox messages. Firestore writes are idempotent
+ * (keyed on incidentId), so reprocessing is harmless.
  */
-async function fetchNewMessages(pushHistoryId) {
-  const gmail = getGmail();
-
-  // Use whichever is older: our tracked id or the one from the push
-  const startId = lastHistoryId || pushHistoryId;
-
-  let history;
-  try {
-    const res = await gmail.users.history.list({
-      userId: 'me',
-      startHistoryId: startId,
-      historyTypes: ['messageAdded'],
-      labelId: 'INBOX',
-    });
-    history = res.data.history || [];
-  } catch (err) {
-    if (err.code === 404) {
-      // historyId too old — Gmail expired it. Fall back to unread scan.
-      console.log('[Gmail] historyId expired, falling back to unread scan.');
-      return fetchUnread();
-    }
-    throw err;
-  }
-
-  // Advance our checkpoint
-  lastHistoryId = pushHistoryId;
-
-  // Collect unique message IDs that were added
-  const seen = new Set();
-  const messageIds = [];
-  for (const entry of history) {
-    for (const added of entry.messagesAdded || []) {
-      if (!seen.has(added.message.id)) {
-        seen.add(added.message.id);
-        messageIds.push(added.message.id);
-      }
-    }
-  }
-
-  if (!messageIds.length) return [];
-
-  return fetchByIds(messageIds);
-}
-
-/**
- * Fallback: fetch unread inbox messages (used when historyId expires).
- */
-async function fetchUnread() {
+async function fetchNewMessages() {
   const gmail = getGmail();
   const list = await gmail.users.messages.list({
     userId: 'me',
@@ -97,27 +44,37 @@ async function fetchUnread() {
     maxResults: 20,
   });
   if (!list.data.messages?.length) return [];
-  return fetchByIds(list.data.messages.map(m => m.id));
-}
 
-/**
- * Fetch full raw content for a list of message IDs.
- */
-async function fetchByIds(ids) {
-  const gmail = getGmail();
-  const results = [];
-  for (const id of ids) {
-    const msg = await gmail.users.messages.get({
-      userId: 'me',
-      id,
-      format: 'raw',
-    });
-    const raw = Buffer.from(msg.data.raw, 'base64url').toString('utf-8');
-    const subjectMatch = raw.match(/^Subject:\s*(.+)$/im);
-    const subject = subjectMatch ? subjectMatch[1].trim() : '(no subject)';
-    results.push({ id, subject, raw });
-  }
+  // Fetch all messages in parallel
+  const results = await Promise.all(
+    list.data.messages.map(async ({ id }) => {
+      const msg = await gmail.users.messages.get({
+        userId: 'me',
+        id,
+        format: 'raw',
+      });
+      const raw = Buffer.from(msg.data.raw, 'base64url').toString('utf-8');
+      const subjectMatch = raw.match(/^Subject:\s*(.+)$/im);
+      const subject = subjectMatch ? subjectMatch[1].trim() : '(no subject)';
+      return { id, subject, raw };
+    }),
+  );
   return results;
 }
 
-module.exports = { registerWatch, fetchNewMessages };
+/**
+ * Mark messages as read so they aren't reprocessed on the next push.
+ */
+async function markAsRead(messageIds) {
+  const gmail = getGmail();
+  await gmail.users.messages.batchModify({
+    userId: 'me',
+    requestBody: {
+      ids: messageIds,
+      removeLabelIds: ['UNREAD'],
+    },
+  });
+  console.log(`[Gmail] Marked ${messageIds.length} message(s) as read.`);
+}
+
+module.exports = { registerWatch, fetchNewMessages, markAsRead };

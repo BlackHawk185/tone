@@ -1,5 +1,5 @@
 {
-  "name": "tone-imap-listener",
+  "name": "tone-dispatch-listener",
   "version": "1.0.0",
   "description": "Gmail push listener for Tone dispatch app",
   "main": "src/index.js",

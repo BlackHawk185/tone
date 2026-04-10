@@ -9,12 +9,37 @@
 /**
  * Parse an M/D/YYYY H:mm:ss timestamp into an ISO string. Returns null on failure.
  */
+/**
+ * Parse a timestamp from IAR dispatch emails. These are always in
+ * America/Denver (Mountain Time). We compute the UTC offset manually
+ * using US DST rules (Mar 2nd Sun 2:00 → Nov 1st Sun 2:00).
+ */
 function parseTimestamp(raw) {
   if (!raw) return null;
   const match = raw.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
   if (!match) return null;
-  const [, month, day, year, hour, min, sec] = match;
-  return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(min), Number(sec)).toISOString();
+  const [, month, day, year, hour, min, sec] = match.map(Number);
+
+  // Determine if Mountain Daylight Time is in effect (UTC-6) or MST (UTC-7).
+  // US DST: starts 2nd Sunday of March at 2:00, ends 1st Sunday of November at 2:00.
+  const isDST = (() => {
+    if (month > 3 && month < 11) return true;
+    if (month < 3 || month > 11) return false;
+    // Find the relevant Sunday
+    const d = new Date(Date.UTC(year, month - 1, 1));
+    const firstDayOfWeek = d.getUTCDay();
+    if (month === 3) {
+      const secondSunday = firstDayOfWeek === 0 ? 8 : 15 - firstDayOfWeek;
+      return day > secondSunday || (day === secondSunday && hour >= 2);
+    }
+    // November — 1st Sunday
+    const firstSunday = firstDayOfWeek === 0 ? 1 : 8 - firstDayOfWeek;
+    return day < firstSunday || (day === firstSunday && hour < 2);
+  })();
+
+  const offsetHours = isDST ? 6 : 7;
+  const dt = new Date(Date.UTC(year, month - 1, day, hour + offsetHours, min, sec));
+  return dt.toISOString();
 }
 
 /**
@@ -41,20 +66,29 @@ function parseDispatchEmail(subject, body) {
   }
   if (!incidentId) incidentId = `TONE-${Date.now()}`;
 
-  // --- Incident Type (EMS takes precedence over Fire) ---
-  const emsMatch  = text.match(/EMS\s+Incident\s+Info\s*:\s*(.+?)(?=\s+(?:EMS\s+)?Call\s+Priority)/im);
-  const fireMatch = text.match(/Fire\s+Incident\s+Info\s*:\s*(.+?)(?=\s+(?:Fire\s+)?Call\s+Priority)/im);
-  const emsType   = emsMatch  ? emsMatch[1].replace(/[-–]+\s*$/, '').trim()  : null;
-  const fireType  = fireMatch ? fireMatch[1].replace(/[-–]+\s*$/, '').trim() : null;
-  const incidentType = (emsType || fireType || subject.trim() || 'Unknown').toUpperCase();
-
-  // --- Priority (lowest number = most urgent) ---
+  // --- Priority (parse early — also drives category & type decisions) ---
+  // No 's' flag: each regex must match on a single line so EMS doesn't bleed
+  // into the Fire line (or vice-versa) when one side has no priority number.
+  const emsP  = text.match(/EMS\s+Incident\s+Info.*?Call\s+Priority\s*:\s*(\d+)/i);
+  const fireP = text.match(/Fire\s+Incident\s+Info.*?Call\s+Priority\s*:\s*(\d+)/i);
   const priorities = [];
-  const emsP  = text.match(/EMS\s+Incident\s+Info.*?Call\s+Priority\s*:\s*(\d+)/is);
-  const fireP = text.match(/Fire\s+Incident\s+Info.*?Call\s+Priority\s*:\s*(\d+)/is);
   if (emsP)  priorities.push(parseInt(emsP[1],  10));
   if (fireP) priorities.push(parseInt(fireP[1], 10));
   const priority = priorities.length ? String(Math.min(...priorities)) : null;
+
+  // --- Incident Category (EMS vs FIRE — for notification routing) ---
+  // Primary signal: did dispatch assign an EMS Call Priority number?
+  // Every true EMS call gets one; fire-only calls (even with EMS standby) do not.
+  const incidentCategory = emsP ? 'EMS' : 'FIRE';
+
+  // --- Incident Type (descriptive text for display) ---
+  const emsMatch  = text.match(/EMS\s+Incident\s+Info\s*:\s*(.+?)(?=\s+(?:EMS\s+)?Call\s+Priority)/im);
+  const fireMatch = text.match(/Fire\s+Incident\s+Info\s*:\s*(.+?)(?=\s+(?:Fire\s+)?Call\s+Priority)/im);
+  // Only trust emsType when EMS actually has a priority; otherwise the
+  // captured text is an artifact of the empty "EMS Incident Info: EMS Call Priority:" line.
+  const emsType   = (emsMatch && emsP) ? emsMatch[1].replace(/[-–]+\s*$/, '').trim()  : null;
+  const fireType  = fireMatch ? fireMatch[1].replace(/[-–]+\s*$/, '').trim() : null;
+  const incidentType = (emsType || fireType || subject.trim() || 'Unknown').toUpperCase();
 
   // --- Address ---
   const addrMatch = text.match(/Incident\s+Location\s*:\s*(.+?)(?=\s*Cross\s+Streets|\n)/im);
@@ -92,7 +126,7 @@ function parseDispatchEmail(subject, body) {
     const dateTag = block.match(/\*{3}(\d{1,2}\/\d{1,2}\/\d{4})\*{3}/);
     const dateStr = dateTag ? dateTag[1] : null;
     for (const line of block.split('\n')) {
-      const m = line.trim().match(/^(\d{2}:\d{2}:\d{2})\s+([A-Z]+)\s+-\s+(.+)$/);
+      const m = line.trim().match(/^(\d{2}:\d{2}:\d{2})\s+(.+?)\s+-\s+(.+)$/);
       if (!m) continue;
       const [, time, author, entryText] = m;
       narrative.push({
@@ -139,6 +173,7 @@ function parseDispatchEmail(subject, body) {
   return {
     incidentId,
     incidentType,
+    incidentCategory,
     address,
     crossStreets,
     fireQuadrant,

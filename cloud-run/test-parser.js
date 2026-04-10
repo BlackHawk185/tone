@@ -51,4 +51,41 @@ Dispatched: 4/4/2026 00:07:38
 For questions or to report issues about Rip & Runs, contact Rick (Rick.Fisher@laramiecountywy.gov) 637-6592.`;
 
 const result = parseDispatchEmail('LCFD #5 Rip & Run', body);
-console.log(JSON.stringify(result, null, 2));
+console.log('=== EMS+Fire (Accident) ===');
+console.log('  incidentType:', result.incidentType);
+console.log('  incidentCategory:', result.incidentCategory);
+console.log('  priority:', result.priority);
+console.log();
+
+// Fire-only call that was previously misclassified as EMS
+const fireBody = `LCFD #5 Rip & Run
+Report Time: 4/9/2026 16:40:22
+Incident Date/Time: 4/9/2026 16:39:52
+Incident Number(s): [2026-00000072 21523]
+EMS Incident Info: EMS Call Priority:
+Fire Incident Info: Service Call Fire Call Priority: 3
+Incident Location: 801 MUDDY CREEK DR, Pine Bluffs Cross Streets: US 30 / DEAD END
+Laramie County Weed & Pest - Pine
+Fire Quadrant: FD5-FD3 EMS District: PBAMB
+Google Maps link:
+https://www.google.com/maps/search/?api=1&query=41.1763689457143,-104.079459770083
+Alerts:
+Nature of Call: fuel alarm
+Narrative:
+First Unit Dispatched: 4/9/2026 16:40:21
+Dispatch Order:
+1S53
+S53
+Unit Status Times:
+21523: Fire District #5
+Assigned Station: FD5
+Unit: S53
+Dispatched: 4/9/2026 16:40:21 Enroute: 4/9/2026 16:40:21 Arrived: 4/9/2026 16:40:21
+For questions or to report issues about Rip & Runs, contact Rick (Rick.Fisher@laramiecountywy.gov) 637-6592.`;
+
+const fireResult = parseDispatchEmail('LCFD #5 Rip & Run', fireBody);
+console.log('=== Fire-only (Fuel Alarm) ===');
+console.log('  incidentType:', fireResult.incidentType);
+console.log('  incidentCategory:', fireResult.incidentCategory);
+console.log('  priority:', fireResult.priority);
+console.log('  natureOfCall:', fireResult.natureOfCall);

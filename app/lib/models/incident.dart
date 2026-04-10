@@ -24,6 +24,7 @@ class NarrativeEntry {
 class Incident {
   final String incidentId;
   final String incidentType;
+  final String incidentCategory;
   final String address;
   final String? crossStreets;
   final String? fireQuadrant;
@@ -41,6 +42,7 @@ class Incident {
   const Incident({
     required this.incidentId,
     required this.incidentType,
+    required this.incidentCategory,
     required this.address,
     this.crossStreets,
     this.fireQuadrant,
@@ -69,9 +71,10 @@ class Incident {
         .toList();
 
     return Incident(
-      incidentId:   doc.id,
-      incidentType: data['incidentType']  as String? ?? 'Unknown',
-      address:      data['address']       as String? ?? 'Unknown',
+      incidentId:       doc.id,
+      incidentType:     data['incidentType']     as String? ?? 'Unknown',
+      incidentCategory: data['incidentCategory'] as String? ?? 'FIRE',
+      address:          data['address']          as String? ?? 'Unknown',
       crossStreets: data['crossStreets']  as String?,
       fireQuadrant: data['fireQuadrant']  as String?,
       emsDistrict:  data['emsDistrict']   as String?,

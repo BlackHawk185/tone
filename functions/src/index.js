@@ -21,40 +21,39 @@ exports.onNewIncident = onDocumentCreated('incidents/{incidentId}', async (event
   const isMessage = incident.incidentType === 'MESSAGE';
   const isPriorityMessage = incident.incidentType === 'PRIORITY TRAFFIC';
 
-  // Determine FCM topic based on incident type
+  // Determine FCM topic based on incident category
   let topic;
   if (isMessage) {
     topic = 'messages';
   } else if (isPriorityMessage) {
     topic = 'priority_messages';
-  } else if (/MEDICAL|EMS|CARDIAC|BREATHING|STROKE|TRAUMA|UNCONSCIOUS/i.test(incident.incidentType)) {
+  } else if (incident.incidentCategory === 'EMS') {
     topic = 'dispatch_ems';
   } else {
     topic = 'dispatch_fire';
   }
 
+  // Build notification title/body for iOS APNS alert
+  const title = isPriorityMessage ? `\u26a0 ${incident.address}` : isMessage ? `${incident.address}` : `TONE: ${incident.incidentType}`;
+  const body = (isMessage || isPriorityMessage) ? (incident.natureOfCall || '') : (incident.address || '');
+
+  // Data-only message (no top-level `notification` key) so Android always
+  // delivers to DispatchMessagingService.onMessageReceived, even when
+  // the app is backgrounded. iOS still shows via apns.payload.aps.alert.
   const message = {
     topic,
-    notification: {
-      title: isPriorityMessage ? `\u26a0 ${incident.address}` : isMessage ? `${incident.address}` : `TONE: ${incident.incidentType}`,
-      body: (isMessage || isPriorityMessage) ? incident.natureOfCall : incident.address,
-    },
     data: {
       incidentId,
-      incidentType: incident.incidentType,
-      address: incident.address,
+      incidentType: incident.incidentType || '',
+      channel: topic,
+      address: incident.address || '',
       units: JSON.stringify(incident.units || []),
-      dispatchTime: incident.dispatchTime,
+      natureOfCall: incident.natureOfCall || '',
+      dispatchTime: incident.dispatchTime || '',
       priority: incident.priority || '',
     },
     android: {
       priority: 'high',
-      notification: {
-        channelId: 'dispatch_alerts',
-        sound: 'tone_alert',
-        priority: 'max',
-        visibility: 'public',
-      },
     },
     apns: {
       headers: {
@@ -63,7 +62,12 @@ exports.onNewIncident = onDocumentCreated('incidents/{incidentId}', async (event
       },
       payload: {
         aps: {
-          sound: 'tone_alert.caf',
+          alert: { title, body },
+          sound: {
+            critical: 1,
+            name: 'default',
+            volume: 1.0,
+          },
           'content-available': 1,
           'interruption-level': 'critical',
         },

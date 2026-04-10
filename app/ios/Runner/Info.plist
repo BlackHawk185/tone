@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>tone</string>
+	<string>Tone</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -49,6 +49,11 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Location permission descriptions -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Tone uses your location to share your ETA and distance with fellow responders during an active incident.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Tone uses your location to keep your ETA updated while you are responding to an incident, even when the app is in the background.</string>
 	<!-- Background execution for push notifications and background fetch -->
 	<key>UIBackgroundModes</key>
 	<array>

@@ -49,7 +49,7 @@ class _PulsingDotState extends State<PulsingDot>
       height: size * 2.5,
       child: AnimatedBuilder(
         animation: _controller,
-        builder: (_, __) => Stack(
+        builder: (_, _) => Stack(
           alignment: Alignment.center,
           children: [
             // Expanding ring

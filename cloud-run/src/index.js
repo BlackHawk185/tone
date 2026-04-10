@@ -2,7 +2,7 @@ require('dotenv').config();
 const http = require('http');
 const { parseDispatchEmail } = require('./emailParser');
 const { writeIncident } = require('./firestore');
-const { registerWatch, fetchNewMessages } = require('./gmail');
+const { registerWatch, fetchNewMessages, markAsRead } = require('./gmail');
 
 const PORT = process.env.PORT || 8080;
 const PUSH_SECRET = process.env.PUSH_SECRET || '';
@@ -12,7 +12,18 @@ const PUSH_SECRET = process.env.PUSH_SECRET || '';
  */
 function extractPlainText(raw) {
   let text = raw;
+  // Decode quoted-printable: soft line breaks, then =XX hex sequences
   text = text.replace(/=\r?\n/g, '');
+  text = text.replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => {
+    const byte = parseInt(hex, 16);
+    // Only decode non-printable, high-byte, or '=' (0x3D) — these are the
+    // bytes a valid QP encoder must encode. Printable ASCII (33-126 except 61)
+    // is never QP-encoded, so sequences like =41 in URL params are left alone.
+    if (byte === 0x3D || byte < 0x21 || byte > 0x7E) {
+      return String.fromCharCode(byte);
+    }
+    return `=${hex}`;
+  });
   if (/<html[\s>]/i.test(text)) {
     text = text
       .replace(/<br\s*\/?>/gi, '\n')
@@ -34,16 +45,22 @@ function extractPlainText(raw) {
  * Process messages returned by Gmail history API.
  */
 async function processMessages(messages) {
-  for (const { subject, raw } of messages) {
-    console.log(`[Process] "${subject}"`);
-    const body = extractPlainText(raw);
-    const incident = parseDispatchEmail(subject, body);
-    if (incident) {
-      await writeIncident(incident);
-      console.log(`[Firestore] ${incident.incidentId} written (final=${incident.isFinal})`);
-    } else {
-      console.log(`[Skip] "${subject}"`);
+  try {
+    for (const { subject, raw } of messages) {
+      console.log(`[Process] "${subject}"`);
+      const body = extractPlainText(raw);
+      const incident = parseDispatchEmail(subject, body);
+      if (incident) {
+        await writeIncident(incident);
+      } else {
+        console.log(`[Skip] "${subject}"`);
+      }
     }
+  } finally {
+    // Always mark as read — even if processing threw. Firestore writes are
+    // idempotent so reprocessing on the next push is safe; leaving messages
+    // unread causes infinite reprocessing loops.
+    await markAsRead(messages.map(m => m.id));
   }
 }
 
@@ -57,29 +74,15 @@ const server = http.createServer((req, res) => {
 
   // Pub/Sub push — the ONE processing path
   if (req.method === 'POST' && req.url === `/pubsub/${PUSH_SECRET}`) {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', () => {}); // drain request body
     req.on('end', () => {
       // Ack immediately
       res.writeHead(204);
       res.end();
 
-      // Extract historyId from Pub/Sub envelope
-      let historyId = null;
-      try {
-        const envelope = JSON.parse(body);
-        const data = envelope.message?.data
-          ? JSON.parse(Buffer.from(envelope.message.data, 'base64').toString())
-          : {};
-        historyId = data.historyId;
-      } catch (_) {}
+      console.log('[Push] Pub/Sub notification received, checking inbox.');
 
-      if (!historyId) {
-        console.log('[Push] No historyId in notification, skipping.');
-        return;
-      }
-
-      fetchNewMessages(historyId)
+      fetchNewMessages()
         .then(msgs => {
           if (!msgs.length) {
             console.log('[Push] No new inbox messages in history.');
@@ -106,8 +109,6 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`[HTTP] Listening on :${PORT}`);
-  // Register watch on startup to seed historyId — no message processing
-  registerWatch().catch(err => console.error('[Watch] Startup error:', err.message));
 });
 
 

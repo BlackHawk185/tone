@@ -5,8 +5,18 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Vibrate on dispatch alert -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Allow notification channels to bypass Do Not Disturb -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <!-- Location for ETA/distance sharing -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Full-screen intent for dispatch alerts on lock screen -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Draw over other apps: bring dispatch alert to foreground from background -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <application
-        android:label="tone"
+        android:label="Tone"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -17,7 +27,9 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true">
             <!-- Specifies an Android theme to apply to this Activity as soon as
                  the Android process has started. This theme is visible to the user
                  while the Flutter UI initializes. After that, this theme continues
@@ -31,10 +43,18 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Custom FCM service to bring app to foreground on dispatch -->
+        <service
+            android:name=".DispatchMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <!-- Default FCM notification channel ID -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="dispatch_alerts" />
+            android:value="dispatch_fire" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

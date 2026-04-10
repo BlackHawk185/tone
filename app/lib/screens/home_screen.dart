@@ -199,13 +199,16 @@ class HomeScreen extends StatelessWidget {
                       }
                       final incidents = snapshot.data ?? [];
                       if (incidents.isEmpty) {
-                        return const Center(
+                        return Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.check_circle_outline, size: 64, color: Colors.green),
-                              SizedBox(height: 12),
-                              Text('No active incidents', style: TextStyle(fontSize: 18)),
+                              const Icon(Icons.handyman, size: 64, color: Colors.amber),
+                              const SizedBox(height: 12),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 24),
+                                child: Text("Where'd all the incidents go? Steve's probably broke something.", style: const TextStyle(fontSize: 16), textAlign: TextAlign.center),
+                              ),
                             ],
                           ),
                         );
@@ -240,8 +243,20 @@ void _showMessageDialog(BuildContext context, {String initialText = ''}) {
   final controller = TextEditingController(text: initialText);
   showDialog(
     context: context,
+    useRootNavigator: false,
     builder: (ctx) => AlertDialog(
-      title: const Text('Broadcast Message'),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      title: Row(
+        children: [
+          const Expanded(child: Text('Broadcast Message')),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.pop(ctx),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
       content: TextField(
         controller: controller,
         autofocus: true,
@@ -253,28 +268,19 @@ void _showMessageDialog(BuildContext context, {String initialText = ''}) {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () {
+        _SendSplitButton(
+          onSend: () {
             final text = controller.text.trim();
             if (text.isEmpty) return;
             Navigator.pop(ctx);
             _confirmSend(context, text, priority: false);
           },
-          child: const Text('Send'),
-        ),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: const Color(0xFFFF6D00)),
-          onPressed: () {
+          onPriority: () {
             final text = controller.text.trim();
             if (text.isEmpty) return;
             Navigator.pop(ctx);
             _confirmSend(context, text, priority: true);
           },
-          child: const Text('Priority'),
         ),
       ],
     ),
@@ -285,12 +291,19 @@ void _confirmSend(BuildContext context, String text, {required bool priority}) {
   final color = priority ? const Color(0xFFFF6D00) : Theme.of(context).colorScheme.primary;
   showDialog(
     context: context,
+    useRootNavigator: false,
     builder: (ctx) => AlertDialog(
       title: Row(
         children: [
           if (priority) const Icon(Icons.priority_high, color: Color(0xFFFF6D00)),
           if (priority) const SizedBox(width: 8),
-          Text(priority ? 'Confirm Priority Traffic' : 'Confirm Message'),
+          Expanded(child: Text(priority ? 'Confirm Priority' : 'Confirm Message')),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.pop(ctx),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
         ],
       ),
       content: Column(
@@ -321,10 +334,6 @@ void _confirmSend(BuildContext context, String text, {required bool priority}) {
             _showMessageDialog(context, initialText: text);
           },
           child: const Text('Edit'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: const Text('Cancel'),
         ),
         FilledButton(
           style: priority ? FilledButton.styleFrom(backgroundColor: const Color(0xFFFF6D00)) : null,
@@ -438,9 +447,9 @@ class _IncidentCardState extends State<IncidentCard>
                             TextSpan(
                               text: ' — ${incident.natureOfCall}',
                               style: TextStyle(
-                                color: isActive ? Colors.white70 : Colors.grey.shade500,
-                                fontWeight: FontWeight.w500,
-                                fontSize: 11,
+                                color: isActive ? Colors.white : Colors.grey.shade500,
+                                fontWeight: FontWeight.w400,
+                                fontSize: 12,
                                 letterSpacing: 0.3,
                               ),
                             ),
@@ -499,9 +508,7 @@ class _IncidentCardState extends State<IncidentCard>
                             final allRoles = ResponseRole.rolesForType(incident.incidentType);
                             final roleCount = <String, int>{};
                             for (final r in incident.responders.values) {
-                              if (r.role != null) {
-                                roleCount[r.role!] = (roleCount[r.role!] ?? 0) + 1;
-                              }
+                              roleCount[r.role] = (roleCount[r.role] ?? 0) + 1;
                             }
                             return allRoles
                                 .where((role) => roleCount.containsKey(role.id))
@@ -510,7 +517,7 @@ class _IncidentCardState extends State<IncidentCard>
                                   return Padding(
                                     padding: const EdgeInsets.only(right: 8),
                                     child: BounceOnChange(
-                                      bounceKey: isMyRole ? (myStatus!.role ?? 'rig') : 'inactive',
+                                      bounceKey: isMyRole ? myStatus!.role : 'inactive',
                                       child: InfoTile(
                                         icon: role.icon,
                                         label: role.label.toUpperCase(),
@@ -572,6 +579,81 @@ class _IncidentCardState extends State<IncidentCard>
     if (eta == null) return null;
     final distStr = miles < 10 ? miles.toStringAsFixed(1) : miles.round().toString();
     return _DistEta(distStr: distStr, etaMin: eta);
+  }
+}
+
+class _SendSplitButton extends StatefulWidget {
+  final VoidCallback onSend;
+  final VoidCallback onPriority;
+  const _SendSplitButton({required this.onSend, required this.onPriority});
+
+  @override
+  State<_SendSplitButton> createState() => _SendSplitButtonState();
+}
+
+class _SendSplitButtonState extends State<_SendSplitButton> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bg = theme.colorScheme.primary;
+    final fg = theme.colorScheme.onPrimary;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: IntrinsicHeight(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Material(
+              color: bg,
+              child: InkWell(
+                onTap: widget.onSend,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Text('Send', style: TextStyle(color: fg, fontWeight: FontWeight.w500)),
+                ),
+              ),
+            ),
+            Container(width: 1, color: fg.withOpacity(0.3)),
+            Material(
+              color: bg,
+              child: InkWell(
+                onTap: () => setState(() => _expanded = !_expanded),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                  child: AnimatedRotation(
+                    turns: _expanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(Icons.arrow_drop_down, color: fg, size: 20),
+                  ),
+                ),
+              ),
+            ),
+            if (_expanded) ...[
+              Container(width: 1, color: fg.withOpacity(0.3)),
+              Material(
+                color: const Color(0xFFFF6D00),
+                child: InkWell(
+                  onTap: widget.onPriority,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.priority_high, color: fg, size: 16),
+                        const SizedBox(width: 4),
+                        Text('Priority', style: TextStyle(color: fg, fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }
 

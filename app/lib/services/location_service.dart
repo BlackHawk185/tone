@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:geolocator/geolocator.dart';
 
 /// Provides the device's current position and utilities for computing
