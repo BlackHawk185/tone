@@ -11,12 +11,19 @@ workflows:
         script: |
           cd app
           flutter pub get
-      - name: Build IPA for AltStore
+      - name: Build iOS app
         script: |
           cd app
-          flutter build ipa --release
+          flutter build ios --release --no-codesign
+      - name: Package IPA
+        script: |
+          cd app/build/ios/Release-iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/
+          zip -r Tone.ipa Payload
+          mv Tone.ipa ../../../..
     artifacts:
-      - app/build/ios/ipa/*.ipa
+      - app/Tone.ipa
   
   ios-debug:
     name: iOS Debug Build
