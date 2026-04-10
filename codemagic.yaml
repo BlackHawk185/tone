@@ -14,7 +14,7 @@ workflows:
       - name: Build IPA for AltStore
         script: |
           cd app
-          flutter build ipa --release --no-codesign
+          flutter build ipa --release
     artifacts:
       - app/build/ios/ipa/*.ipa
   
