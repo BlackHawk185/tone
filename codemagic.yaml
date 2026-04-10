@@ -1,4 +1,23 @@
 workflows:
+  ios-release:
+    name: iOS Release Build (AltStore)
+    max_build_duration: 120
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Get dependencies
+        script: |
+          cd app
+          flutter pub get
+      - name: Build IPA for AltStore
+        script: |
+          cd app
+          flutter build ipa --release --no-codesign
+    artifacts:
+      - app/build/ios/ipa/*.ipa
+  
   ios-debug:
     name: iOS Debug Build
     max_build_duration: 60
