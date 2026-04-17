@@ -18,16 +18,19 @@ class FcmService {
   static Stream<Map<String, dynamic>> get dispatchAlertStream => _dispatchAlertStream.stream;
 
   static Future<void> initialize() async {
-    // Get and log the FCM token
-    try {
-      final token = await _fcm.getToken();
-      debugPrint('[FCM] Device FCM token: $token');
-    } catch (e) {
-      debugPrint('[FCM] Error getting token: $e');
+    // On web, skip token fetch and topic subscription — the browser will
+    // prompt for notification permission if we call getToken() here.
+    // Permission is requested explicitly by the user tapping the badge
+    // on the login screen, after which subscribeToAllTopics() is called.
+    if (!kIsWeb) {
+      try {
+        final token = await _fcm.getToken();
+        debugPrint('[FCM] Device FCM token: $token');
+      } catch (e) {
+        debugPrint('[FCM] Error getting token: $e');
+      }
+      await subscribeToAllTopics();
     }
-
-    // Subscribe to all topics so we receive messages sent to them
-    await subscribeToAllTopics();
 
     // Set up token refresh listener (in case token changes)
     _fcm.onTokenRefresh.listen((newToken) {
@@ -39,9 +42,9 @@ class FcmService {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       debugPrint('[FCM] Foreground message: ${message.data}');
 
-      final incidentType = message.data['incidentType'] ?? '';
-      if (incidentType != 'MESSAGE' && message.data.containsKey('incidentId')) {
-        final channel = message.data['channel'] ?? 'dispatch_fire';
+      final serviceType = message.data['serviceType'] ?? 'UNKNOWN';
+      if (serviceType != 'MESSAGE' && message.data.containsKey('incidentId')) {
+        final channel = message.data['channel'] ?? 'dispatch_PBAMB';
         if (!kIsWeb && Platform.isAndroid) {
           final enabled = await isChannelEnabled(channel);
           if (!enabled) {
@@ -75,8 +78,8 @@ class FcmService {
   /// Route an incoming message to either the full-screen dispatch alert
   /// or a plain navigation depending on type.
   static void _routeMessage(Map<String, dynamic> data) {
-    final incidentType = data['incidentType'] ?? '';
-    if (incidentType != 'MESSAGE' && data.containsKey('incidentId')) {
+    final serviceType = data['serviceType'] ?? 'UNKNOWN';
+    if (serviceType != 'MESSAGE' && data.containsKey('incidentId')) {
       debugPrint('[FCM] Routing to dispatch alert overlay');
       _dispatchAlertStream.add(Map<String, dynamic>.from(data));
     } else {
@@ -93,28 +96,27 @@ class FcmService {
     }
   }
 
-  /// Subscribe to all FCM topics. Called after notification permission is
-  /// confirmed granted (e.g. from the permissions gate screen).
+  /// Subscribe to FCM topics based on the user's dynamic channel subscriptions.
+  /// Each subscribed unit code gets topics like dispatch_21523, priority_21523, etc.
+  /// On web, also fetches the FCM token (safe to call only after notification permission granted).
   static Future<void> subscribeToAllTopics() async {
-    if (kIsWeb) return;
-
-    const topics = [
-      'dispatch_fire',
-      'dispatch_ems',
-      'messages',
-      'priority_messages',
-    ];
-
-    if (!kIsWeb && Platform.isAndroid) {
-      // Android: always subscribe to all topics (no user toggle)
-      for (final topic in topics) {
-        await _fcm.subscribeToTopic(topic);
+    if (kIsWeb) {
+      try {
+        final token = await _fcm.getToken();
+        debugPrint('[FCM] Web FCM token: $token');
+      } catch (e) {
+        debugPrint('[FCM] Error getting web token: $e');
       }
-      debugPrint('[FCM] Force-subscribed to all topics (Android)');
-    } else {
-      // iOS / other: respect user preferences
-      final prefs = await SharedPreferences.getInstance();
-      for (final topic in topics) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final codes = prefs.getStringList('subscribed_unit_codes') ?? [];
+    const types = ['dispatch', 'priority', 'messages'];
+
+    for (final code in codes) {
+      for (final type in types) {
+        final topic = '${type}_$code';
         final enabled = prefs.getBool('topic_$topic') ?? true;
         if (enabled) {
           await _fcm.subscribeToTopic(topic);
@@ -122,8 +124,8 @@ class FcmService {
           await _fcm.unsubscribeFromTopic(topic);
         }
       }
-      debugPrint('[FCM] Topics synced from preferences');
     }
+    debugPrint('[FCM] Topics synced for ${codes.length} unit codes');
   }
 
   static Future<String?> getToken() => _fcm.getToken();

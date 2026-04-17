@@ -37,9 +37,12 @@ class _LoginScreenState extends State<LoginScreen>
   bool _dndGranted = false;
   bool _overlayGranted = false;
   bool _checkingPermissions = true;
+  // On web, require the app to be installed as a PWA before login is accessible.
+  bool _isPwa = true;
 
   bool get _isAndroid => !kIsWeb && Platform.isAndroid;
   bool get _allGranted =>
+      _isPwa &&
       _notificationsGranted &&
       _locationGranted &&
       (_isAndroid ? _dndGranted : true) &&
@@ -72,6 +75,20 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _checkingPermissions = true);
 
     try {
+      // ── PWA gate (web only) ──
+      if (kIsWeb) {
+        final pwa = web_perms.isPwa();
+        if (!pwa) {
+          // Not installed — no point checking other permissions yet.
+          if (mounted) setState(() {
+            _isPwa = false;
+            _checkingPermissions = false;
+          });
+          return;
+        }
+        setState(() => _isPwa = true);
+      }
+
       // ── Notifications ──
       bool notifGranted = false;
       if (kIsWeb) {
@@ -89,12 +106,19 @@ class _LoginScreenState extends State<LoginScreen>
 
       // ── Location ──
       bool locGranted = false;
-      try {
-        final locPerm = await Geolocator.checkPermission();
-        locGranted = locPerm == LocationPermission.always ||
-            locPerm == LocationPermission.whileInUse;
-      } catch (_) {
-        locGranted = true;
+      if (kIsWeb) {
+        // Use the Permissions API — never triggers a browser prompt.
+        final state = await web_perms.checkLocationPermission();
+        locGranted = state == 'granted';
+      } else {
+        try {
+          final locPerm = await Geolocator.checkPermission();
+          locGranted = locPerm == LocationPermission.always ||
+              locPerm == LocationPermission.whileInUse;
+        } catch (_) {
+          // Platform doesn't support location services (desktop) — treat as granted.
+          locGranted = true;
+        }
       }
 
       // ── DND (Android only) ──
@@ -235,31 +259,28 @@ class _LoginScreenState extends State<LoginScreen>
       if (name.isNotEmpty) {
         await AuthService.currentUser?.updateDisplayName(name);
       }
+      // Tell the autofill framework the form was submitted successfully so
+      // password managers (1Password, etc.) get the save/update prompt.
+      TextInput.finishAutofillContext();
       if (mounted) context.go('/home');
     } on FirebaseAuthException catch (e) {
-      final msg = switch (e.code) {
-        'user-not-found' || 'invalid-email' => 'Email not recognized.',
-        'wrong-password' || 'invalid-credential' => 'Incorrect password.',
-        'user-disabled' => 'Account disabled.',
-        'too-many-requests' => 'Too many attempts. Try again later.',
-        _ => 'Sign in failed.',
-      };
-      setState(() => _error = msg);
+      setState(() => _error = _authErrorMessage(e.code));
     } on FirebaseException catch (e) {
-      final msg = switch (e.code) {
-        'user-not-found' || 'invalid-email' => 'Email not recognized.',
-        'wrong-password' || 'invalid-credential' => 'Incorrect password.',
-        'user-disabled' => 'Account disabled.',
-        'too-many-requests' => 'Too many attempts. Try again later.',
-        _ => 'Sign in failed.',
-      };
-      setState(() => _error = msg);
+      setState(() => _error = _authErrorMessage(e.code));
     } catch (_) {
       setState(() => _error = 'Sign in failed.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
+
+  String _authErrorMessage(String code) => switch (code) {
+        'user-not-found' || 'invalid-email' => 'Email not recognized.',
+        'wrong-password' || 'invalid-credential' => 'Incorrect password.',
+        'user-disabled' => 'Account disabled.',
+        'too-many-requests' => 'Too many attempts. Try again later.',
+        _ => 'Sign in failed.',
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -315,6 +336,13 @@ class _LoginScreenState extends State<LoginScreen>
           alignment: WrapAlignment.center,
           runAlignment: WrapAlignment.center,
           children: [
+            if (kIsWeb)
+              _PermissionIcon(
+                icon: Icons.install_desktop,
+                label: 'Install App',
+                granted: _isPwa,
+                onTap: _isPwa ? () {} : () => web_perms.triggerInstallPrompt(),
+              ),
             _PermissionIcon(
               icon: Icons.notifications,
               label: 'Notifications',
@@ -350,13 +378,16 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildLoginForm() {
     return Form(
       key: _formKey,
-      child: Column(
+      child: AutofillGroup(
+        onDisposeAction: AutofillContextAction.commit,
+        child: Column(
         children: [
           TextFormField(
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
             textInputAction: TextInputAction.next,
+            autofillHints: const [AutofillHints.email],
             decoration: const InputDecoration(
               labelText: 'Email',
               border: OutlineInputBorder(),
@@ -379,6 +410,7 @@ class _LoginScreenState extends State<LoginScreen>
             controller: _passwordController,
             obscureText: true,
             textInputAction: TextInputAction.done,
+            autofillHints: const [AutofillHints.password],
             onFieldSubmitted: (_) => _signIn(),
             decoration: const InputDecoration(
               labelText: 'Password',
@@ -405,6 +437,7 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
         ],
+      ),
       ),
     );
   }

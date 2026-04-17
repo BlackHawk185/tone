@@ -17,6 +17,7 @@ async function run() {
     incidentType: 'STRUCTURE FIRE',
     address: '123 Main St, Anytown',
     units: ['E1', 'E3', 'M2'],
+    unitCodes: ['DEBUG'],
     priority: '1',
     dispatchTime: now,
     status: 'active',

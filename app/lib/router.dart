@@ -2,7 +2,6 @@ import 'package:go_router/go_router.dart';
 import 'package:tone/screens/login_screen.dart';
 import 'package:tone/screens/home_screen.dart';
 import 'package:tone/screens/incident_screen.dart';
-import 'package:tone/screens/alert_profiles_test_page.dart';
 import 'package:tone/services/auth_service.dart';
 
 final appRouter = GoRouter(
@@ -34,10 +33,6 @@ final appRouter = GoRouter(
       builder: (context, state) => IncidentScreen(
         incidentId: state.pathParameters['id']!,
       ),
-    ),
-    GoRoute(
-      path: '/alert-profiles',
-      builder: (context, state) => const AlertProfilesTestPage(),
     ),
   ],
 );

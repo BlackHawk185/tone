@@ -44,7 +44,7 @@ class DispatchMessagingService : FirebaseMessagingService() {
 
         val incidentId = message.data["incidentId"] ?: return
         val incidentType = message.data["incidentType"] ?: return
-        val channelId = message.data["channel"] ?: "dispatch_fire"
+        val channelId = message.data["channel"] ?: "dispatch_PBAMB"
 
         // Don't hijack screen for plain messages
         if (incidentType == "MESSAGE") return
@@ -72,6 +72,7 @@ class DispatchMessagingService : FirebaseMessagingService() {
             putExtra("incidentType", incidentType)
             putExtra("address", message.data["address"] ?: "")
             putExtra("units", message.data["units"] ?: "[]")
+            putExtra("unitCodes", message.data["unitCodes"] ?: "[]")
             putExtra("natureOfCall", message.data["natureOfCall"] ?: "")
             putExtra("dispatchTime", message.data["dispatchTime"] ?: "")
         }
@@ -178,13 +179,19 @@ class DispatchMessagingService : FirebaseMessagingService() {
         val normalVibration = longArrayOf(0, 250, 150, 250)
 
         data class Ch(val id: String, val name: String, val desc: String, val bypassDnd: Boolean, val vibration: LongArray)
-        val channels = listOf(
-            Ch("dispatch_fire", "Fire Dispatch", "Fire dispatch alerts", true, urgentVibration),
-            Ch("dispatch_ems", "EMS Dispatch", "EMS dispatch alerts", true, urgentVibration),
-            Ch("priority_messages", "Priority Traffic", "Priority traffic messages", true, urgentVibration),
-            Ch("messages", "Messages", "General department messages", false, normalVibration),
-            Ch("debug", "Debug Test", "Debug channel for testing dispatch alerts", false, normalVibration),
+
+        val agencies = mapOf(
+            "PBAMB" to "PB EMS",
+            "21523" to "LCFD5",
         )
+
+        val channels = mutableListOf<Ch>()
+        for ((code, label) in agencies) {
+            channels.add(Ch("dispatch_$code", "Dispatch \u2014 $label", "Dispatch alerts for $label", true, urgentVibration))
+            channels.add(Ch("priority_$code", "Priority \u2014 $label", "Priority traffic for $label", true, urgentVibration))
+            channels.add(Ch("messages_$code", "Messages \u2014 $label", "Messages for $label", false, normalVibration))
+        }
+
         for (ch in channels) {
             val channel = NotificationChannel(
                 ch.id, ch.name, NotificationManager.IMPORTANCE_HIGH

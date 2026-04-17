@@ -40,15 +40,19 @@ class IncidentService {
   }
 
   /// Send a broadcast message as a lightweight MESSAGE-type incident
-  static Future<void> sendMessage(String text, {bool priority = false}) async {
+  static Future<void> sendMessage(String text, {bool priority = false, List<String> unitCodes = const []}) async {
     final user = AuthService.currentUser;
     final now = DateTime.now().toUtc().toIso8601String();
     final docRef = _db.collection('incidents').doc();
     await docRef.set({
       'incidentType': priority ? 'PRIORITY TRAFFIC' : 'MESSAGE',
+      'incidentCategory': priority ? 'PRIORITY TRAFFIC' : 'MESSAGE',
+      'serviceType': priority ? 'PRIORITY TRAFFIC' : 'MESSAGE',
+      'displayLabel': text,
       'address': user?.displayName ?? 'Unknown',
       'natureOfCall': text,
       'units': <String>[],
+      'unitCodes': unitCodes,
       'dispatchTime': now,
       'status': 'active',
       'narrative': <Map<String, dynamic>>[],

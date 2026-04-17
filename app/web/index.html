@@ -31,6 +31,14 @@
 
   <title>tone</title>
   <link rel="manifest" href="manifest.json">
+  <script>
+    // Capture the PWA install prompt so Dart can trigger it on demand.
+    window._deferredInstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      window._deferredInstallPrompt = e;
+    });
+  </script>
 </head>
 <body>
   <!--

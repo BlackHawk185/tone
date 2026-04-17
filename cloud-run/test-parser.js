@@ -89,3 +89,43 @@ console.log('  incidentType:', fireResult.incidentType);
 console.log('  incidentCategory:', fireResult.incidentCategory);
 console.log('  priority:', fireResult.priority);
 console.log('  natureOfCall:', fireResult.natureOfCall);
+
+const grassFireBody = `LCFD #5 Rip & Run
+Report Time: 4/11/2026 17:06:33
+Incident Date/Time: 4/11/2026 17:04:59
+Incident Number(s): [2026-00000074 21523], [2026-00000032 21501]
+EMS Incident Info: EMS Call Priority:
+Fire Incident Info: Fire - Grass Lg Struct Fire Call Priority: 2
+Incident Location: 1526 STATE HWY 215, County Cross Streets: ROAD 215 / ROAD 216
+Fire Quadrant: FD5-FD3 EMS District: PBAMB
+Google Maps link:
+https://www.google.com/maps/search/?api=1&query=41.2218816552064,-104.089560617787
+Alerts:
+Nature of Call: GRASS FIRE
+Narrative:
+***4/11/2026***
+17:05:38 daye - ProQA Paramount Fire: CC Text: BRUSH/GRASS fire
+17:06:16 daye - ProQA Paramount Fire: Dispatch Code: 82D07 (LARGE BRUSH/GRASS fire, structures THREATENED) Response: . ANSWERS: -- The caller is on scene (1st party). -- This is a BRUSH/GRASS fire. -- A LARGE area is burning. -- The fire has not been reported by the caller as extinguished. -- Residential areas are being threatened by the fire.
+First Unit Dispatched: 4/11/2026 17:06:31
+Dispatch Order:
+1FD5FD5 - Fires and Accidents [FD5-FD3]
+2FD3FD5 - Fires and Accidents [FD5-FD3]
+FD3, FD5
+Unit Status Times:
+21501: Fire District #3
+Assigned Station: FD3
+Unit: FD3
+Dispatched: 4/11/2026 17:06:31
+21523: Fire District #5
+Assigned Station: FD5
+Unit: FD5
+Dispatched: 4/11/2026 17:06:31
+For questions or to report issues about Rip & Runs, contact Rick (Rick.Fisher@laramiecountywy.gov) 637-6592.`;
+
+const grassFireResult = parseDispatchEmail('LCFD #5 Rip & Run', grassFireBody);
+console.log();
+console.log('=== Fire-only (Grass Fire) ===');
+console.log('  incidentType:', grassFireResult.incidentType);
+console.log('  incidentCategory:', grassFireResult.incidentCategory);
+console.log('  priority:', grassFireResult.priority);
+console.log('  natureOfCall:', grassFireResult.natureOfCall);

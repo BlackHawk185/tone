@@ -15,9 +15,9 @@ class ResponseRole {
   });
 
   /// Default role — what everyone does if they don't pick something else.
-  static const rig = ResponseRole(
-    id: 'rig',
-    label: 'Rig',
+  static const responding = ResponseRole(
+    id: 'responding',
+    label: 'Responding',
     icon: Icons.fire_truck,
     priority: 0,
   );
@@ -80,7 +80,7 @@ class ResponseRole {
 
   /// All known roles by id.
   static const _all = {
-    'rig': rig,
+    'responding': responding,
     'direct_to_scene': directToScene,
     'rig_operator': rigOperator,
     'entry_team': entryTeam,
@@ -94,7 +94,7 @@ class ResponseRole {
   static ResponseRole? fromId(String? id) => _all[id];
 
   /// Roles that appear on every incident type.
-  static const _global = [rig, directToScene, delayed];
+  static const _global = [responding, directToScene, delayed];
 
   /// Additional roles specific to certain incident categories.
   static const _typeSpecific = {
@@ -105,9 +105,21 @@ class ResponseRole {
     'hazmat': [safety],
   };
 
-  /// Returns only the type-specific roles (no globals) for this incident type.
-  static List<ResponseRole> typeSpecificRoles(String incidentType) {
-    final type = incidentType.toUpperCase();
+  static List<ResponseRole> _mergeUnique(List<ResponseRole> roles) {
+    final seen = <String>{};
+    return roles.where((role) => seen.add(role.id)).toList();
+  }
+
+  /// Returns only the type-specific roles (no globals) for this service type.
+  static List<ResponseRole> typeSpecificRoles(String serviceType) {
+    final type = serviceType.toUpperCase();
+    if (type == 'BOTH') {
+      return _mergeUnique([
+        ...?_typeSpecific['fire'],
+        ...?_typeSpecific['medical'],
+      ]);
+    }
+
     String category = 'default';
     if (_matches(type, ['FIRE', 'STRUCTURE', 'BRUSH', 'VEHICLE FIRE', 'WILDLAND'])) {
       category = 'fire';
@@ -125,8 +137,19 @@ class ResponseRole {
 
   /// Returns global roles + type-specific roles for this incident.
   /// Order = display/fill priority. First in list is the default.
-  static List<ResponseRole> rolesForType(String incidentType) {
-    final type = incidentType.toUpperCase();
+  static List<ResponseRole> rolesForType(String serviceType) {
+    final type = serviceType.toUpperCase();
+    if (type == 'BOTH') {
+      return [
+        ..._global.where((r) => r.id != 'delayed'),
+        ..._mergeUnique([
+          ...?_typeSpecific['fire'],
+          ...?_typeSpecific['medical'],
+        ]),
+        delayed,
+      ];
+    }
+
     String category = 'default';
     if (_matches(type, ['FIRE', 'STRUCTURE', 'BRUSH', 'VEHICLE FIRE', 'WILDLAND'])) {
       category = 'fire';

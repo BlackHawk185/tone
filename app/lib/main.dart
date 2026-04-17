@@ -1,13 +1,13 @@
 import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tone/router.dart';
 import 'package:tone/screens/dispatch_alert_screen.dart';
 import 'package:tone/services/auth_service.dart';
 import 'package:tone/services/fcm_service.dart';
-import 'package:tone/services/location_service.dart';
 import 'package:tone/services/response_service.dart';
 import 'firebase_options.dart';
 
@@ -50,16 +50,18 @@ class _ToneAppState extends State<ToneApp> {
     super.initState();
 
     // Listen for native dispatch alerts (app brought to foreground by DispatchMessagingService)
-    _settingsChannel.setMethodCallHandler((call) async {
-      if (call.method == 'onDispatchAlert') {
-        final data = Map<String, dynamic>.from(call.arguments as Map);
-        debugPrint('[App] Native dispatch alert: ${data['incidentId']}');
-        _showDispatchAlert(data);
-      }
-    });
+    if (!kIsWeb) {
+      _settingsChannel.setMethodCallHandler((call) async {
+        if (call.method == 'onDispatchAlert') {
+          final data = Map<String, dynamic>.from(call.arguments as Map);
+          debugPrint('[App] Native dispatch alert: ${data['incidentId']}');
+          _showDispatchAlert(data);
+        }
+      });
 
-    // Check if we were launched by a dispatch intent
-    _checkPendingDispatch();
+      // Check if we were launched by a dispatch intent
+      _checkPendingDispatch();
+    }
 
     // Listen for notification taps and navigate to incident
     _notificationSubscription =
@@ -110,7 +112,7 @@ class _ToneAppState extends State<ToneApp> {
         incidentId: incidentId,
         uid: user.uid,
         displayName: name,
-        role: 'rig',
+        role: 'responding',
       );
       debugPrint('[App] Quick-respond success for $incidentId');
     } catch (e) {
@@ -132,15 +134,25 @@ class _ToneAppState extends State<ToneApp> {
       }
     }
 
+    final uCodes = data['unitCodes'];
+    List<String> unitCodeList = [];
+    if (uCodes is String && uCodes.isNotEmpty) {
+      try {
+        unitCodeList = List<String>.from(jsonDecode(uCodes));
+      } catch (_) {}
+    }
+
     nav.push(
       PageRouteBuilder(
         opaque: true,
         pageBuilder: (_, __, ___) => DispatchAlertScreen(
           incidentId: data['incidentId'] ?? '',
-          incidentType: data['incidentType'] ?? 'DISPATCH',
+          serviceType: data['serviceType'] ?? data['incidentType'] ?? 'UNKNOWN',
+          displayLabel: data['displayLabel'] ?? data['natureOfCall'] ?? '',
           address: data['address'] ?? 'Unknown',
           natureOfCall: data['natureOfCall'],
           units: unitList,
+          unitCodes: unitCodeList,
         ),
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),

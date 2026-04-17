@@ -1,16 +1,51 @@
-import 'dart:io' show Platform;
+import 'dart:async';import 'dart:io' show Platform;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:go_router/go_router.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tone/models/user_status.dart';
 import 'package:tone/services/auth_service.dart';
 import 'package:tone/services/user_status_service.dart';
+import 'package:tone/utils/text_styles.dart';
+import 'package:tone/widgets/dialog_title_bar.dart';
 
 class SettingsMenu extends StatelessWidget {
   const SettingsMenu({super.key});
+
+  /// Notifies listeners when channel subscriptions change.
+  static final subscriptionsChanged = ValueNotifier<int>(0);
+
+  /// Well-known unit codes and friendly names. Used as suggestions
+  /// and display labels. Users can subscribe to any code, not just these.
+  static const knownUnitLabels = {
+    '21523': 'District 5 (FD5)',
+    'PBAMB': 'Pine Bluffs EMS',
+    '21503': 'District 3 (FD3)',
+    'AMR': 'AMR Ambulance',
+    'DEBUG': 'Test Alerts',
+  };
+
+  /// Returns the user's subscribed unit codes from SharedPreferences.
+  static Future<List<String>> getSubscribedUnitCodes() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList('subscribed_unit_codes') ?? [];
+  }
+
+  /// Returns unit codes the user has subscribed to for messages specifically.
+  static Future<List<String>> getMessageSubscribedUnitCodes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final codes = prefs.getStringList('subscribed_unit_codes') ?? [];
+    return codes
+        .where((code) => prefs.getBool('topic_messages_$code') ?? true)
+        .toList();
+  }
+
+  /// Display label for a unit code.
+  static String labelFor(String code) => knownUnitLabels[code] ?? code;
 
   @override
   Widget build(BuildContext context) {
@@ -48,46 +83,183 @@ class _SettingsSheet extends StatefulWidget {
 }
 
 class _SettingsSheetState extends State<_SettingsSheet> {
+  /// Local notifications plugin for sound + vibration alerts.
+  static final _notifications = FlutterLocalNotificationsPlugin();
+  static bool _notifInit = false;
+
   /// Flip to true to show the "Test Dispatch" button in settings.
-  static const _debugMode = true;
 
-  static const _topics = {
-    'dispatch_fire': 'Fire Calls',
-    'dispatch_ems': 'EMS Calls',
-    'priority_messages': 'Priority Traffic',
-    'messages': 'Messages',
+
+  /// Channel types a user can subscribe to per unit code.
+  static const _channelTypes = {
+    'dispatch': _ChannelInfo('Dispatch', Icons.notifications_active),
+    'priority': _ChannelInfo('Priority Traffic', Icons.warning_amber),
+    'messages': _ChannelInfo('Messages', Icons.message),
   };
 
-  // Android notification channel IDs → display info
-  static const _channelSounds = {
-    'dispatch_fire':      _ChannelInfo('Fire Dispatch', Icons.local_fire_department),
-    'dispatch_ems':       _ChannelInfo('EMS Dispatch', Icons.medical_services),
-    'priority_messages':  _ChannelInfo('Priority Traffic', Icons.warning_amber),
-    'messages':           _ChannelInfo('General Messages', Icons.message),
-  };
-
+  /// Dynamically loaded from SharedPreferences — the unit codes this user follows.
+  List<String> _subscribedCodes = [];
   final Map<String, bool> _subscriptions = {};
   bool _loaded = false;
+
+  /// Which test tone is currently looping (null = none playing).
+  String? _activeTestLabel;
+  Timer? _testLoopTimer;
+  int _testLoopCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadPrefs();
+    _ensureNotificationsReady();
+  }
+
+  static Future<void> _ensureNotificationsReady() async {
+    if (_notifInit) return;
+    try {
+      await _notifications.initialize(
+        settings: const InitializationSettings(
+          android: AndroidInitializationSettings('ic_launcher'),
+          iOS: DarwinInitializationSettings(),
+        ),
+      );
+      _notifInit = true;
+    } catch (e) {
+      debugPrint('[Tone] Notification init: $e');
+    }
+  }
+
+  /// Toggle a test alert: first tap starts, second tap stops.
+  /// Dispatch uses the full native alert sequence (TTS + beep pattern).
+  /// Priority/Message use simple tone playback.
+  void _toggleTestAlert({
+    required String label,
+    required String soundAsset,
+    required List<Duration> vibrationPattern,
+  }) {
+    // If this tone is already playing, stop it
+    if (_activeTestLabel == label) {
+      _stopTestAlert();
+      return;
+    }
+    // If a different tone is playing, stop it first
+    if (_activeTestLabel != null) _stopTestAlert();
+
+    setState(() => _activeTestLabel = label);
+
+    if (label == 'Dispatch') {
+      // Full native alert sequence: "Dispatch received" → thrum pattern → loop
+      _settingsChannel.invokeMethod('startAlertSequence');
+    } else if (label == 'Priority') {
+      // Same native engine, different speech primer
+      _settingsChannel.invokeMethod('startAlertSequence', {'speechText': 'Priority traffic received'});
+    } else {
+      final resName = soundAsset.replaceAll(RegExp(r'\.[^.]+$'), '');
+      _testLoopCount = 0;
+      _fireTestTone(resName, 0.8, vibrationPattern);
+      _testLoopTimer = Timer.periodic(const Duration(milliseconds: 5500), (_) {
+        if (_activeTestLabel != label) return;
+        _testLoopCount++;
+        final vol = (_testLoopCount * 0.05 + 0.35).clamp(0.35, 0.8);
+        _fireTestTone(resName, vol, vibrationPattern);
+      });
+    }
+  }
+
+  void _fireTestTone(String resName, double volume, List<Duration> vibrationPattern) {
+    try {
+      _settingsChannel.invokeMethod('playSound', {'sound': resName, 'volume': volume});
+      if (!kIsWeb) {
+        final pattern = <int>[0];
+        for (final d in vibrationPattern) {
+          pattern.add(d.inMilliseconds);
+        }
+        _settingsChannel.invokeMethod('vibrate', {'pattern': pattern});
+      }
+    } catch (e) {
+      debugPrint('[Tone] Test alert error: $e');
+    }
+  }
+
+  void _speakAndVibrate(String text, List<Duration> vibrationPattern) {
+    try {
+      _settingsChannel.invokeMethod('speak', {'text': text});
+      if (!kIsWeb && vibrationPattern.isNotEmpty) {
+        final pattern = <int>[0];
+        for (final d in vibrationPattern) {
+          pattern.add(d.inMilliseconds);
+        }
+        _settingsChannel.invokeMethod('vibrate', {'pattern': pattern});
+      }
+    } catch (e) {
+      debugPrint('[Tone] TTS error: $e');
+    }
+  }
+
+  void _stopTestAlert() {
+    _testLoopTimer?.cancel();
+    _testLoopTimer = null;
+    try {
+      _settingsChannel.invokeMethod('stopAlertSequence');
+      _settingsChannel.invokeMethod('stopSpeaking');
+      _settingsChannel.invokeMethod('stopSound');
+      _settingsChannel.invokeMethod('cancelVibration');
+    } catch (_) {}
+    setState(() => _activeTestLabel = null);
+  }
+
+  @override
+  void dispose() {
+    _stopTestAlert();
+    super.dispose();
+  }
+
+  Widget _buildTestTile({
+    required String label,
+    required String subtitle,
+    required IconData icon,
+    required String soundAsset,
+    required List<Duration> vibrationPattern,
+  }) {
+    final isPlaying = _activeTestLabel == label;
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon, color: isPlaying ? Colors.green : null),
+      title: Text(
+        '$label Tone',
+        style: TextStyle(color: isPlaying ? Colors.green : null),
+      ),
+      subtitle: Text(
+        isPlaying ? 'Playing — tap to stop' : subtitle,
+        style: TextStyle(
+          fontSize: 11,
+          color: isPlaying ? Colors.green.shade300 : null,
+        ),
+      ),
+      trailing: Icon(
+        isPlaying ? Icons.stop : Icons.play_arrow,
+        size: 20,
+        color: isPlaying ? Colors.green : null,
+      ),
+      onTap: () => _toggleTestAlert(
+        label: label,
+        soundAsset: soundAsset,
+        vibrationPattern: vibrationPattern,
+      ),
+    );
   }
 
   bool get _isAndroid => !kIsWeb && Platform.isAndroid;
 
   Future<void> _loadPrefs() async {
-    if (_isAndroid) {
-      // Android: force-subscribe to all topics, no user toggle
-      for (final topic in _topics.keys) {
-        _subscriptions[topic] = true;
-        await FirebaseMessaging.instance.subscribeToTopic(topic);
-      }
-    } else {
-      final prefs = await SharedPreferences.getInstance();
-      for (final topic in _topics.keys) {
-        _subscriptions[topic] = prefs.getBool('topic_$topic') ?? true;
+    final prefs = await SharedPreferences.getInstance();
+    _subscribedCodes = prefs.getStringList('subscribed_unit_codes') ?? [];
+
+    for (final code in _subscribedCodes) {
+      for (final type in _channelTypes.keys) {
+        final key = '${type}_$code';
+        _subscriptions[key] = prefs.getBool('topic_$key') ?? true;
       }
     }
     if (mounted) setState(() => _loaded = true);
@@ -105,6 +277,74 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     }
   }
 
+  Future<void> _addChannel(String code) async {
+    if (code.isEmpty || _subscribedCodes.contains(code)) return;
+    final prefs = await SharedPreferences.getInstance();
+    _subscribedCodes.add(code);
+    await prefs.setStringList('subscribed_unit_codes', _subscribedCodes);
+    // Default: all types on — responders should receive everything until they opt out
+    for (final type in _channelTypes.keys) {
+      final key = '${type}_$code';
+      _subscriptions[key] = true;
+      await prefs.setBool('topic_$key', true);
+      if (!kIsWeb) {
+        await FirebaseMessaging.instance.subscribeToTopic(key);
+      }
+    }
+    if (mounted) setState(() {});
+    SettingsMenu.subscriptionsChanged.value++;
+  }
+
+  Future<void> _removeChannel(String code) async {
+    final prefs = await SharedPreferences.getInstance();
+    _subscribedCodes.remove(code);
+    await prefs.setStringList('subscribed_unit_codes', _subscribedCodes);
+    for (final type in _channelTypes.keys) {
+      final key = '${type}_$code';
+      _subscriptions.remove(key);
+      await prefs.remove('topic_$key');
+      if (!kIsWeb) {
+        await FirebaseMessaging.instance.unsubscribeFromTopic(key);
+      }
+    }
+    if (mounted) setState(() {});
+    SettingsMenu.subscriptionsChanged.value++;
+  }
+
+  void _showAddChannelDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      useRootNavigator: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Subscribe to Channel'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(
+            labelText: 'Channel code',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final code = controller.text.trim().toUpperCase();
+              Navigator.pop(ctx);
+              _addChannel(code);
+            },
+            child: const Text('Subscribe'),
+          ),
+        ],
+      ),
+    );
+  }
+
   static const _settingsChannel = MethodChannel('com.valence.tone/settings');
 
   Future<void> _openChannelSettings(String channelId) async {
@@ -114,17 +354,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       });
     } catch (e) {
       debugPrint('[Settings] Could not open channel settings: $e');
-    }
-  }
-
-  Future<void> _sendTestDispatch() async {
-    // 10 second delay so you can lock the screen
-    debugPrint('[Settings] Test dispatch will fire in 10 seconds...');
-    await Future.delayed(const Duration(seconds: 10));
-    try {
-      await _settingsChannel.invokeMethod('sendTestDispatch');
-    } catch (e) {
-      debugPrint('[Settings] Error sending test dispatch: $e');
     }
   }
 
@@ -160,12 +389,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             // ── Custom Status ──
             const Text(
               'STATUS',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-                color: Colors.grey,
-              ),
+              style: ToneTextStyles.settingsLabel,
             ),
             const SizedBox(height: 4),
             StreamBuilder<UserStatus?>(
@@ -191,65 +415,122 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             const Divider(),
             const Text(
               'NOTIFICATIONS',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-                color: Colors.grey,
-              ),
+              style: ToneTextStyles.settingsLabel,
             ),
             const SizedBox(height: 4),
-            // Android: manage notifications at the OS channel level only
-            if (_isAndroid) ...[
+            // Channel subscriptions (all platforms)
+            if (!_loaded)
               const Padding(
-                padding: EdgeInsets.only(top: 2, bottom: 4),
-                child: Text(
-                  'Tap to manage sound, vibration & visibility',
-                  style: TextStyle(fontSize: 11, color: Colors.grey),
-                ),
-              ),
-              ..._channelSounds.entries.map((e) => ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(e.value.icon, size: 20),
-                    title: Text(e.value.label, style: const TextStyle(fontSize: 14)),
-                    trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
-                    onTap: () => _openChannelSettings(e.key),
-                  )),
-            ]
-            // iOS / web: in-app topic toggles
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              )
             else ...[
-              if (!_loaded)
+              if (_subscribedCodes.isEmpty)
                 const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                )
-              else
-                ..._topics.entries.map((e) => SwitchListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(e.value),
-                      value: _subscriptions[e.key] ?? true,
-                      onChanged: (v) => _toggle(e.key, v),
-                    )),
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    'No channels subscribed. Add one below.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
+              ..._subscribedCodes.map((code) {
+                final label = SettingsMenu.labelFor(code);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 2),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              label.toUpperCase(),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.6,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () => _removeChannel(code),
+                            child: const Icon(Icons.close, size: 16, color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ..._channelTypes.entries.map((ch) {
+                      final topicKey = '${ch.key}_$code';
+                      if (_isAndroid) {
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(ch.value.icon, size: 18),
+                          title: Text(ch.value.label, style: const TextStyle(fontSize: 13)),
+                          trailing: const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
+                          onTap: () => _openChannelSettings(topicKey),
+                        );
+                      }
+                      return SwitchListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        secondary: Icon(ch.value.icon, size: 18),
+                        title: Text(ch.value.label, style: const TextStyle(fontSize: 13)),
+                        value: _subscriptions[topicKey] ?? false,
+                        onChanged: (v) => _toggle(topicKey, v),
+                      );
+                    }),
+                  ],
+                );
+              }),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _showAddChannelDialog,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Subscribe to Channel'),
+              ),
+
             ],
             const Divider(),
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.notifications_active),
-              title: const Text('Alert Profiles'),
-              subtitle: const Text(
-                'Customize sound & vibration patterns',
-                style: TextStyle(fontSize: 11, color: Colors.grey),
+            if (_subscribedCodes.contains('DEBUG')) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  'TEST ALERTS'.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                    color: Colors.grey,
+                  ),
+                ),
               ),
-              trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
-              onTap: () {
-                Navigator.pop(context);
-                context.go('/alert-profiles');
-              },
-            ),
-            const Divider(),
+              _buildTestTile(
+                label: 'Dispatch',
+                subtitle: '"Dispatch received" + thrum pattern',
+                icon: Icons.volume_up,
+                soundAsset: 'dispatch_thrum.wav',
+                vibrationPattern: const [],
+              ),
+              _buildTestTile(
+                label: 'Priority',
+                subtitle: '"Priority traffic received" + thrum pattern',
+                icon: Icons.record_voice_over,
+                soundAsset: '',
+                vibrationPattern: const [],
+              ),
+              _buildTestTile(
+                label: 'Message',
+                subtitle: 'Soft bell — informational, no urgency',
+                icon: Icons.notifications_none,
+                soundAsset: 'message_tone.wav',
+                vibrationPattern: const [
+                  Duration(milliseconds: 200),
+                ],
+              ),
+              const Divider(),
+            ],
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
@@ -257,46 +538,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               title: const Text('Share App'),
               onTap: () {
                 Navigator.pop(context);
-                // TODO: implement share
+                _showShareDialog(context);
               },
             ),
             const Divider(),
-            if (_debugMode) ...[                          
-              const Text(
-                'DEBUG',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
-                  color: Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 4),
-              ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.bug_report, color: Colors.orange),
-                title: const Text('Send Test Dispatch'),
-                subtitle: const Text(
-                  'Triggers a fake dispatch alert via debug channel',
-                  style: TextStyle(fontSize: 11, color: Colors.grey),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _sendTestDispatch();
-                },
-              ),
-              if (_isAndroid)
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.notifications_none, size: 20),
-                  title: const Text('Debug Channel Settings', style: TextStyle(fontSize: 14)),
-                  trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
-                  onTap: () => _openChannelSettings('debug'),
-                ),
-              const Divider(),
-            ],
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
@@ -320,6 +565,57 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       context: context,
       useRootNavigator: false,
       builder: (ctx) => const _SetStatusDialog(),
+    );
+  }
+
+  void _showShareDialog(BuildContext context) {
+    const downloadUrl = 'https://tone.web.app/download';
+    showDialog(
+      context: context,
+      useRootNavigator: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Share App'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            QrImageView(
+              data: downloadUrl,
+              size: 200,
+              backgroundColor: Colors.white,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: SelectableText(
+                    downloadUrl,
+                    style: const TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.copy, size: 18),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: () {
+                    Clipboard.setData(const ClipboardData(text: downloadUrl));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Link copied')),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -437,17 +733,7 @@ class _SetStatusDialogState extends State<_SetStatusDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Row(
-        children: [
-          const Expanded(child: Text('Set Status')),
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () => Navigator.pop(context),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
-        ],
-      ),
+      title: const DialogTitleBar(title: 'Set Status'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -455,12 +741,7 @@ class _SetStatusDialogState extends State<_SetStatusDialog> {
           children: [
             const Text(
               'STATUS',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-                color: Colors.grey,
-              ),
+              style: ToneTextStyles.settingsLabel,
             ),
             const SizedBox(height: 8),
             Wrap(
@@ -503,12 +784,7 @@ class _SetStatusDialogState extends State<_SetStatusDialog> {
             const SizedBox(height: 16),
             const Text(
               'DURATION (HOURS)',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-                color: Colors.grey,
-              ),
+              style: ToneTextStyles.settingsLabel,
             ),
             const SizedBox(height: 8),
             TextField(

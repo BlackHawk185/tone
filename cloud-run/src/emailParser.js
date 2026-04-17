@@ -42,6 +42,24 @@ function parseTimestamp(raw) {
   return dt.toISOString();
 }
 
+function isFireUnitCode(code) {
+  return /^215\d+$/.test(code);
+}
+
+function isEmsUnitCode(code) {
+  return code === 'PBAMB' || code === 'AMR' || /(?:EMS|AMB)/.test(code);
+}
+
+function deriveServiceType(unitCodes) {
+  const hasFire = unitCodes.some(isFireUnitCode);
+  const hasEms = unitCodes.some(isEmsUnitCode);
+
+  if (hasFire && hasEms) return 'BOTH';
+  if (hasEms) return 'EMS';
+  if (hasFire) return 'FIRE';
+  return 'UNKNOWN';
+}
+
 /**
  * @param {string} subject - Email subject line
  * @param {string} body    - Full email body (plain text)
@@ -54,11 +72,18 @@ function parseDispatchEmail(subject, body) {
   // or the older "R&R Notification" subject format
   if (!/rip\s*(?:&amp;|&)?\s*run|LCFD\s*#?\d|R&R\s+Notification/i.test(text)) return null;
 
-  // --- Incident ID: prefer FD5 (21523), then PBAMB, then first listed ---
+  // --- Incident ID & Unit Codes ---
+  // Parse ALL [incidentNumber unitCode] pairs from the Incident Number(s) line.
+  // unitCodes drive per-unit FCM topic subscriptions (e.g. dispatch_21523, dispatch_PBAMB).
   let incidentId = null;
+  const unitCodes = [];
   const idSection = text.match(/Incident\s+Number\(s\)\s*:\s*((?:\[[^\]]+\][\s,]*)+)/i);
   if (idSection) {
     const pairs = [...idSection[1].matchAll(/\[(\S+)\s+(\S+)\]/g)];
+    for (const p of pairs) {
+      if (!unitCodes.includes(p[2])) unitCodes.push(p[2]);
+    }
+    // Pick the incident ID: prefer FD5 (21523), then PBAMB, then first listed
     const fd5   = pairs.find(p => p[2] === '21523');
     const pbems = pairs.find(p => p[2] === 'PBAMB');
     const chosen = fd5 || pbems || pairs[0];
@@ -66,7 +91,7 @@ function parseDispatchEmail(subject, body) {
   }
   if (!incidentId) incidentId = `TONE-${Date.now()}`;
 
-  // --- Priority (parse early — also drives category & type decisions) ---
+  // --- Priority ---
   // No 's' flag: each regex must match on a single line so EMS doesn't bleed
   // into the Fire line (or vice-versa) when one side has no priority number.
   const emsP  = text.match(/EMS\s+Incident\s+Info.*?Call\s+Priority\s*:\s*(\d+)/i);
@@ -75,20 +100,6 @@ function parseDispatchEmail(subject, body) {
   if (emsP)  priorities.push(parseInt(emsP[1],  10));
   if (fireP) priorities.push(parseInt(fireP[1], 10));
   const priority = priorities.length ? String(Math.min(...priorities)) : null;
-
-  // --- Incident Category (EMS vs FIRE — for notification routing) ---
-  // Primary signal: did dispatch assign an EMS Call Priority number?
-  // Every true EMS call gets one; fire-only calls (even with EMS standby) do not.
-  const incidentCategory = emsP ? 'EMS' : 'FIRE';
-
-  // --- Incident Type (descriptive text for display) ---
-  const emsMatch  = text.match(/EMS\s+Incident\s+Info\s*:\s*(.+?)(?=\s+(?:EMS\s+)?Call\s+Priority)/im);
-  const fireMatch = text.match(/Fire\s+Incident\s+Info\s*:\s*(.+?)(?=\s+(?:Fire\s+)?Call\s+Priority)/im);
-  // Only trust emsType when EMS actually has a priority; otherwise the
-  // captured text is an artifact of the empty "EMS Incident Info: EMS Call Priority:" line.
-  const emsType   = (emsMatch && emsP) ? emsMatch[1].replace(/[-–]+\s*$/, '').trim()  : null;
-  const fireType  = fireMatch ? fireMatch[1].replace(/[-–]+\s*$/, '').trim() : null;
-  const incidentType = (emsType || fireType || subject.trim() || 'Unknown').toUpperCase();
 
   // --- Address ---
   const addrMatch = text.match(/Incident\s+Location\s*:\s*(.+?)(?=\s*Cross\s+Streets|\n)/im);
@@ -115,6 +126,13 @@ function parseDispatchEmail(subject, body) {
   // --- Nature of Call ---
   const nocMatch = text.match(/Nature\s+of\s+Call\s*:\s*(.+?)(?=\n|$)/im);
   const natureOfCall = (nocMatch && nocMatch[1].trim()) ? nocMatch[1].trim() : null;
+
+  // --- Service Type / Display Label ---
+  // Canonical dispatch type comes from unit codes only.
+  const serviceType = deriveServiceType(unitCodes);
+  const incidentType = serviceType;
+  const incidentCategory = serviceType;
+  const displayLabel = natureOfCall ? natureOfCall.trim() : '';
 
   // --- Narrative (structured: [{time, author, text}]) ---
   // Section runs from "Narrative:" to "First Unit Dispatched:"
@@ -174,11 +192,14 @@ function parseDispatchEmail(subject, body) {
     incidentId,
     incidentType,
     incidentCategory,
+    serviceType,
+    displayLabel,
     address,
     crossStreets,
     fireQuadrant,
     emsDistrict,
     units,
+    unitCodes,
     priority,
     dispatchTime,
     natureOfCall,

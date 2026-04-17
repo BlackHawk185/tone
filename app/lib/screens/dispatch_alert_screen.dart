@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tone/services/auth_service.dart';
-import 'package:tone/services/location_service.dart';
 import 'package:tone/services/response_service.dart';
 import 'package:tone/utils/incident_theme.dart';
 
@@ -13,18 +12,22 @@ const _settingsChannel = MethodChannel('com.valence.tone/settings');
 /// acknowledges. Designed to be impossible to miss.
 class DispatchAlertScreen extends StatefulWidget {
   final String incidentId;
-  final String incidentType;
+  final String serviceType;
+  final String displayLabel;
   final String address;
   final String? natureOfCall;
   final List<String> units;
+  final List<String> unitCodes;
 
   const DispatchAlertScreen({
     super.key,
     required this.incidentId,
-    required this.incidentType,
+    required this.serviceType,
+    required this.displayLabel,
     required this.address,
     this.natureOfCall,
     this.units = const [],
+    this.unitCodes = const [],
   });
 
   @override
@@ -39,6 +42,7 @@ class _DispatchAlertScreenState extends State<DispatchAlertScreen>
   late final Animation<double> _fadeAnim;
   Timer? _autoTimeout;
   bool _responding = false;
+  bool _alertStopped = false;
 
   // Swipe-to-respond state
   double _swipeOffset = 0;
@@ -75,23 +79,33 @@ class _DispatchAlertScreenState extends State<DispatchAlertScreen>
       duration: const Duration(milliseconds: 250),
     );
 
-    // Haptic burst to demand attention
-    _fireHaptics();
+    // "Sentinel" alert loop — calm but persistent
+    _startSentinelAlert();
 
     // Auto-dismiss after 2 minutes (navigate to incident instead)
     _autoTimeout = Timer(const Duration(minutes: 2), _dismiss);
   }
 
-  void _fireHaptics() async {
-    for (int i = 0; i < 5; i++) {
-      HapticFeedback.heavyImpact();
-      await Future.delayed(const Duration(milliseconds: 200));
-    }
+  /// Alert pattern: "Incoming call" (TTS) → tap tap tap × 3 groups → loop.
+  /// Entirely orchestrated on the native side for precise beep/vibration sync.
+  void _startSentinelAlert() {
+    if (_alertStopped) return;
+    final speechText = widget.serviceType == 'PRIORITY TRAFFIC'
+        ? 'Priority traffic received'
+        : 'Dispatch received';
+    _settingsChannel.invokeMethod('startAlertSequence', {'speechText': speechText});
+  }
+
+  void _stopSentinelAlert() {
+    _alertStopped = true;
+    try {
+      _settingsChannel.invokeMethod('stopAlertSequence');
+    } catch (_) {}
   }
 
   @override
   void dispose() {
-    _cancelVibration();
+    _stopSentinelAlert();
     _autoTimeout?.cancel();
     _pulseCtrl.dispose();
     _fadeCtrl.dispose();
@@ -101,23 +115,18 @@ class _DispatchAlertScreenState extends State<DispatchAlertScreen>
   }
 
   void _cancelVibration() {
-    try {
-      _settingsChannel.invokeMethod('cancelVibration');
-    } catch (_) {}
+    _stopSentinelAlert();
   }
 
   void _dismiss() {
     if (!mounted) return;
+    _stopSentinelAlert();
     Navigator.of(context).pop();
-  }
-
-  void _viewIncident() {
-    if (!mounted) return;
-    Navigator.of(context).pop('view');
   }
 
   Future<void> _respond() async {
     if (_responding) return;
+    _stopSentinelAlert();
     setState(() => _responding = true);
     HapticFeedback.heavyImpact();
 
@@ -134,7 +143,7 @@ class _DispatchAlertScreenState extends State<DispatchAlertScreen>
           incidentId: widget.incidentId,
           uid: user.uid,
           displayName: name,
-          role: 'rig',
+          role: 'responding',
           distanceMiles: miles,
           etaMinutes: eta,
         );
@@ -171,7 +180,9 @@ class _DispatchAlertScreenState extends State<DispatchAlertScreen>
 
   @override
   Widget build(BuildContext context) {
-    final theme = IncidentTheme.of(widget.incidentType);
+    final theme = IncidentTheme.of(widget.serviceType, unitCodes: widget.unitCodes);
+    final multiService = IncidentTheme.isMultiService(widget.unitCodes);
+    final headline = widget.displayLabel.isNotEmpty ? widget.displayLabel : widget.serviceType;
 
     return PopScope(
       canPop: false,
@@ -185,7 +196,11 @@ class _DispatchAlertScreenState extends State<DispatchAlertScreen>
               fit: StackFit.expand,
               children: [
                 // ── Pulsing edge glow ──
-                _EdgeGlow(intensity: glow, color: theme.color),
+                _EdgeGlow(
+                  intensity: glow,
+                  color: multiService ? IncidentTheme.emsColor : theme.color,
+                  secondaryColor: multiService ? IncidentTheme.fireColor : null,
+                ),
 
                 // ── Content ──
                 FadeTransition(
@@ -195,27 +210,57 @@ class _DispatchAlertScreenState extends State<DispatchAlertScreen>
                       children: [
                         const Spacer(flex: 3),
 
-                        // ── INCIDENT TYPE ──
+                        // ── SERVICE TYPE ──
                         Text(
-                          widget.incidentType,
+                          widget.serviceType,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: theme.color,
-                            fontSize: 32,
+                            fontSize: 18,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 2,
                           ),
                         ),
 
-                        // ── Nature of call ──
+                        const SizedBox(height: 10),
+
+                        Text(
+                          headline,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1,
+                          ),
+                        ),
+
+                        // ── Nature of call (only if different from headline) ──
                         if (widget.natureOfCall != null &&
-                            widget.natureOfCall!.isNotEmpty) ...[
+                            widget.natureOfCall!.isNotEmpty &&
+                            widget.natureOfCall != headline) ...[
                           const SizedBox(height: 16),
                           Padding(
                             padding:
                                 const EdgeInsets.symmetric(horizontal: 40),
                             child: Text(
                               widget.natureOfCall!,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white.withAlpha(200),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                          ),
+                        ] else if (widget.natureOfCall != null &&
+                            widget.natureOfCall!.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 40),
+                            child: Text(
+                              widget.address,
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: Colors.white.withAlpha(200),
@@ -242,146 +287,153 @@ class _DispatchAlertScreenState extends State<DispatchAlertScreen>
 
                         const Spacer(flex: 3),
 
-                        // ── Swipe to Respond ──
+                        // ── Swipe to Respond + Close button row ──
                         Padding(
                           padding: const EdgeInsets.fromLTRB(24, 0, 24, 0),
-                          child: LayoutBuilder(
-                              builder: (context, constraints) {
-                            final trackW = constraints.maxWidth;
-                            final maxDrag = (trackW - _thumbSize)
-                                .clamp(1.0, double.infinity);
-                            final progress =
-                                (_swipeOffset / maxDrag).clamp(0.0, 1.0);
+                          child: Row(
+                            children: [
+                              // Slider
+                              Expanded(
+                                child: LayoutBuilder(
+                                    builder: (context, constraints) {
+                                  final trackW = constraints.maxWidth;
+                                  final maxDrag = (trackW - _thumbSize)
+                                      .clamp(1.0, double.infinity);
+                                  final progress =
+                                      (_swipeOffset / maxDrag).clamp(0.0, 1.0);
 
-                            return GestureDetector(
-                              onHorizontalDragStart: _onSwipeStart,
-                              onHorizontalDragUpdate: (d) =>
-                                  _onSwipeUpdate(d, trackW),
-                              onHorizontalDragEnd: _onSwipeEnd,
-                              child: Container(
-                                height: 68,
-                                decoration: BoxDecoration(
-                                  color: _responding
-                                      ? Colors.green.withAlpha(60)
-                                      : Colors.green.withAlpha(20),
-                                  borderRadius: BorderRadius.circular(34),
-                                  border: Border.all(
-                                    color: Colors.green.withAlpha(180),
-                                    width: 2,
-                                  ),
-                                ),
-                                child: Stack(
-                                  clipBehavior: Clip.hardEdge,
-                                  children: [
-                                    // Progress fill
-                                    FractionallySizedBox(
-                                      widthFactor: progress,
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: Colors.green.withAlpha(60),
-                                          borderRadius:
-                                              BorderRadius.circular(34),
+                                  return GestureDetector(
+                                    onHorizontalDragStart: _onSwipeStart,
+                                    onHorizontalDragUpdate: (d) =>
+                                        _onSwipeUpdate(d, trackW),
+                                    onHorizontalDragEnd: _onSwipeEnd,
+                                    child: Container(
+                                      height: 68,
+                                      decoration: BoxDecoration(
+                                        color: _responding
+                                            ? Colors.green.withAlpha(60)
+                                            : Colors.green.withAlpha(20),
+                                        borderRadius: BorderRadius.circular(34),
+                                        border: Border.all(
+                                          color: Colors.green.withAlpha(180),
+                                          width: 2,
                                         ),
                                       ),
-                                    ),
-                                    // Label
-                                    Center(
-                                      child: _responding
-                                          ? const Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                SizedBox(
-                                                  width: 18,
-                                                  height: 18,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                    strokeWidth: 2,
-                                                    color: Colors.green,
-                                                  ),
-                                                ),
-                                                SizedBox(width: 12),
-                                                Text('RESPONDING...',
-                                                    style: TextStyle(
-                                                      color: Colors.green,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      fontSize: 15,
-                                                      letterSpacing: 1.5,
-                                                    )),
-                                              ],
-                                            )
-                                          : Text(
-                                              'SLIDE TO RESPOND  \u00BB',
-                                              style: TextStyle(
-                                                color: Colors.green.withAlpha(
-                                                    (255 *
-                                                            (1 -
-                                                                    progress *
-                                                                        1.6)
-                                                                .clamp(
-                                                                    0.0, 1.0))
-                                                        .round()),
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 15,
-                                                letterSpacing: 1.5,
+                                      child: Stack(
+                                        clipBehavior: Clip.hardEdge,
+                                        children: [
+                                          // Progress fill
+                                          FractionallySizedBox(
+                                            widthFactor: progress,
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                color: Colors.green.withAlpha(60),
+                                                borderRadius:
+                                                    BorderRadius.circular(34),
                                               ),
                                             ),
-                                    ),
-                                    // Thumb
-                                    if (!_responding)
-                                      Positioned(
-                                        left: _swipeOffset + 4,
-                                        top: 4,
-                                        bottom: 4,
-                                        child: Container(
-                                          width: _thumbSize - 8,
-                                          decoration: BoxDecoration(
-                                            color: Colors.green,
-                                            borderRadius:
-                                                BorderRadius.circular(30),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.green
-                                                    .withAlpha(80),
-                                                blurRadius: 12,
-                                                spreadRadius: 2,
-                                              ),
-                                            ],
                                           ),
-                                          child: const Icon(
-                                              Icons.directions_run,
-                                              color: Colors.white,
-                                              size: 26),
-                                        ),
+                                          // Label
+                                          Center(
+                                            child: _responding
+                                                ? const Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      SizedBox(
+                                                        width: 18,
+                                                        height: 18,
+                                                        child:
+                                                            CircularProgressIndicator(
+                                                          strokeWidth: 2,
+                                                          color: Colors.green,
+                                                        ),
+                                                      ),
+                                                      SizedBox(width: 12),
+                                                      Text('RESPONDING...',
+                                                          style: TextStyle(
+                                                            color: Colors.green,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            fontSize: 15,
+                                                            letterSpacing: 1.5,
+                                                          )),
+                                                    ],
+                                                  )
+                                                : Text(
+                                                    'RESPOND  \u00BB',
+                                                    style: TextStyle(
+                                                      color: Colors.green.withAlpha(
+                                                          (255 *
+                                                                  (1 -
+                                                                          progress *
+                                                                              1.6)
+                                                                      .clamp(
+                                                                          0.0, 1.0))
+                                                              .round()),
+                                                      fontWeight: FontWeight.bold,
+                                                      fontSize: 15,
+                                                      letterSpacing: 1.5,
+                                                    ),
+                                                  ),
+                                          ),
+                                          // Thumb
+                                          if (!_responding)
+                                            Positioned(
+                                              left: _swipeOffset + 4,
+                                              top: 4,
+                                              bottom: 4,
+                                              child: Container(
+                                                width: _thumbSize - 8,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.green,
+                                                  borderRadius:
+                                                      BorderRadius.circular(30),
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: Colors.green
+                                                          .withAlpha(80),
+                                                      blurRadius: 12,
+                                                      spreadRadius: 2,
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: const Icon(
+                                                    Icons.directions_run,
+                                                    color: Colors.white,
+                                                    size: 26),
+                                              ),
+                                            ),
+                                        ],
                                       ),
-                                  ],
+                                    ),
+                                  );
+                                }),
+                              ),
+
+                              const SizedBox(width: 16),
+
+                              // ── Red hang-up button ──
+                              GestureDetector(
+                                onTap: _dismiss,
+                                child: Container(
+                                  width: 64,
+                                  height: 64,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.red.shade700,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.red.withAlpha(80),
+                                        blurRadius: 16,
+                                        spreadRadius: 2,
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Icon(Icons.close,
+                                      color: Colors.white, size: 32),
                                 ),
                               ),
-                            );
-                          }),
-                        ),
-
-                        const SizedBox(height: 24),
-
-                        // ── Red hang-up button ──
-                        GestureDetector(
-                          onTap: _dismiss,
-                          child: Container(
-                            width: 64,
-                            height: 64,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.red.shade700,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.red.withAlpha(80),
-                                  blurRadius: 16,
-                                  spreadRadius: 2,
-                                ),
-                              ],
-                            ),
-                            child: const Icon(Icons.close,
-                                color: Colors.white, size: 32),
+                            ],
                           ),
                         ),
 
@@ -403,13 +455,14 @@ class _DispatchAlertScreenState extends State<DispatchAlertScreen>
 class _EdgeGlow extends StatelessWidget {
   final double intensity;
   final Color color;
-  const _EdgeGlow({required this.intensity, required this.color});
+  final Color? secondaryColor;
+  const _EdgeGlow({required this.intensity, required this.color, this.secondaryColor});
 
   @override
   Widget build(BuildContext context) {
     return IgnorePointer(
       child: CustomPaint(
-        painter: _EdgeGlowPainter(intensity: intensity, color: color),
+        painter: _EdgeGlowPainter(intensity: intensity, color: color, secondaryColor: secondaryColor),
         size: Size.infinite,
       ),
     );
@@ -419,11 +472,13 @@ class _EdgeGlow extends StatelessWidget {
 class _EdgeGlowPainter extends CustomPainter {
   final double intensity;
   final Color color;
-  _EdgeGlowPainter({required this.intensity, required this.color});
+  final Color? secondaryColor;
+  _EdgeGlowPainter({required this.intensity, required this.color, this.secondaryColor});
 
   @override
   void paint(Canvas canvas, Size size) {
     final glowWidth = 40.0 + 30.0 * intensity;
+    final c2 = secondaryColor;
 
     // Top edge
     canvas.drawRect(
@@ -439,7 +494,8 @@ class _EdgeGlowPainter extends CustomPainter {
         ).createShader(Rect.fromLTWH(0, 0, size.width, glowWidth)),
     );
 
-    // Bottom edge
+    // Bottom edge (secondary color if multi-service)
+    final bottomColor = c2 ?? color;
     canvas.drawRect(
       Rect.fromLTWH(0, size.height - glowWidth, size.width, glowWidth),
       Paint()
@@ -447,8 +503,8 @@ class _EdgeGlowPainter extends CustomPainter {
           begin: Alignment.bottomCenter,
           end: Alignment.topCenter,
           colors: [
-            color.withAlpha((200 * intensity).round()),
-            color.withAlpha(0),
+            bottomColor.withAlpha((200 * intensity).round()),
+            bottomColor.withAlpha(0),
           ],
         ).createShader(Rect.fromLTWH(
             0, size.height - glowWidth, size.width, glowWidth)),
@@ -468,7 +524,7 @@ class _EdgeGlowPainter extends CustomPainter {
         ).createShader(Rect.fromLTWH(0, 0, glowWidth, size.height)),
     );
 
-    // Right edge
+    // Right edge (secondary color if multi-service)
     canvas.drawRect(
       Rect.fromLTWH(size.width - glowWidth, 0, glowWidth, size.height),
       Paint()
@@ -476,8 +532,8 @@ class _EdgeGlowPainter extends CustomPainter {
           begin: Alignment.centerRight,
           end: Alignment.centerLeft,
           colors: [
-            color.withAlpha((200 * intensity).round()),
-            color.withAlpha(0),
+            bottomColor.withAlpha((200 * intensity).round()),
+            bottomColor.withAlpha(0),
           ],
         ).createShader(
             Rect.fromLTWH(size.width - glowWidth, 0, glowWidth, size.height)),
@@ -485,5 +541,6 @@ class _EdgeGlowPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_EdgeGlowPainter old) => old.intensity != intensity;
+  bool shouldRepaint(_EdgeGlowPainter old) =>
+      old.intensity != intensity || old.color != color || old.secondaryColor != secondaryColor;
 }

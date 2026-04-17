@@ -20,66 +20,83 @@ exports.onNewIncident = onDocumentCreated('incidents/{incidentId}', async (event
 
   const isMessage = incident.incidentType === 'MESSAGE';
   const isPriorityMessage = incident.incidentType === 'PRIORITY TRAFFIC';
+  const unitCodes = incident.unitCodes || [];
+  const serviceType = incident.serviceType || incident.incidentCategory || incident.incidentType || '';
+  const displayLabel = incident.displayLabel || incident.natureOfCall || '';
 
-  // Determine FCM topic based on incident category
-  let topic;
+  // Determine FCM topic prefix based on message type
+  let topicPrefix;
   if (isMessage) {
-    topic = 'messages';
+    topicPrefix = 'messages';
   } else if (isPriorityMessage) {
-    topic = 'priority_messages';
-  } else if (incident.incidentCategory === 'EMS') {
-    topic = 'dispatch_ems';
+    topicPrefix = 'priority';
   } else {
-    topic = 'dispatch_fire';
+    topicPrefix = 'dispatch';
   }
 
+  // Build list of unit-specific topics to fan out to.
+  // For dispatches, each unit code gets its own topic (e.g. dispatch_21523).
+  // For messages/priority sent from the app, unitCodes lists the target channels.
+  const topics = unitCodes.length > 0
+    ? unitCodes.map(code => `${topicPrefix}_${code}`)
+    : [`${topicPrefix}_general`];
+
   // Build notification title/body for iOS APNS alert
-  const title = isPriorityMessage ? `\u26a0 ${incident.address}` : isMessage ? `${incident.address}` : `TONE: ${incident.incidentType}`;
+  const title = isPriorityMessage ? `\u26a0 ${incident.address}` : isMessage ? `${incident.address}` : `TONE: ${displayLabel || serviceType}`;
   const body = (isMessage || isPriorityMessage) ? (incident.natureOfCall || '') : (incident.address || '');
 
   // Data-only message (no top-level `notification` key) so Android always
   // delivers to DispatchMessagingService.onMessageReceived, even when
   // the app is backgrounded. iOS still shows via apns.payload.aps.alert.
-  const message = {
-    topic,
-    data: {
-      incidentId,
-      incidentType: incident.incidentType || '',
-      channel: topic,
-      address: incident.address || '',
-      units: JSON.stringify(incident.units || []),
-      natureOfCall: incident.natureOfCall || '',
-      dispatchTime: incident.dispatchTime || '',
-      priority: incident.priority || '',
-    },
-    android: {
-      priority: 'high',
-    },
-    apns: {
-      headers: {
-        'apns-priority': '10',
-        'apns-push-type': 'alert',
-      },
-      payload: {
-        aps: {
-          alert: { title, body },
-          sound: {
-            critical: 1,
-            name: 'default',
-            volume: 1.0,
-          },
-          'content-available': 1,
-          'interruption-level': 'critical',
+  // Fan out to each unit-code topic.
+  const results = await Promise.allSettled(
+    topics.map(topic => {
+      const message = {
+        topic,
+        data: {
+          incidentId,
+          incidentType: incident.incidentType || '',
+          serviceType,
+          displayLabel,
+          channel: topic,
+          address: incident.address || '',
+          units: JSON.stringify(incident.units || []),
+          unitCodes: JSON.stringify(unitCodes),
+          natureOfCall: incident.natureOfCall || '',
+          dispatchTime: incident.dispatchTime || '',
+          priority: incident.priority || '',
         },
-      },
-    },
-  };
+        android: {
+          priority: 'high',
+        },
+        apns: {
+          headers: {
+            'apns-priority': '10',
+            'apns-push-type': 'alert',
+          },
+          payload: {
+            aps: {
+              alert: { title, body },
+              sound: {
+                critical: 1,
+                name: 'default',
+                volume: 1.0,
+              },
+              'content-available': 1,
+              'interruption-level': 'critical',
+            },
+          },
+        },
+      };
+      return admin.messaging().send(message);
+    })
+  );
 
-  try {
-    const response = await admin.messaging().send(message);
-    console.log(`[FCM] Notification sent for incident ${incidentId}:`, response);
-  } catch (err) {
-    console.error(`[FCM] Error sending notification for incident ${incidentId}:`, err);
+  const succeeded = results.filter(r => r.status === 'fulfilled').length;
+  const failed = results.filter(r => r.status === 'rejected');
+  console.log(`[FCM] Sent ${succeeded}/${topics.length} notifications for incident ${incidentId} to topics: ${topics.join(', ')}`);
+  for (const f of failed) {
+    console.error(`[FCM] Failed:`, f.reason);
   }
 });
 

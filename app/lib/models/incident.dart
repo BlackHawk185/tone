@@ -25,11 +25,13 @@ class Incident {
   final String incidentId;
   final String incidentType;
   final String incidentCategory;
+  final String displayLabel;
   final String address;
   final String? crossStreets;
   final String? fireQuadrant;
   final String? emsDistrict;
   final List<String> units;
+  final List<String> unitCodes;
   final String? priority;
   final String dispatchTime;
   final String status;
@@ -43,11 +45,13 @@ class Incident {
     required this.incidentId,
     required this.incidentType,
     required this.incidentCategory,
+    required this.displayLabel,
     required this.address,
     this.crossStreets,
     this.fireQuadrant,
     this.emsDistrict,
     required this.units,
+    required this.unitCodes,
     this.priority,
     required this.dispatchTime,
     required this.status,
@@ -60,6 +64,8 @@ class Incident {
 
   factory Incident.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    final rawServiceType = (data['serviceType'] as String? ?? 'UNKNOWN').toUpperCase();
+    final rawDisplayLabel = (data['displayLabel'] as String? ?? '').trim();
 
     final respondersRaw = data['responders'] as Map<String, dynamic>? ?? {};
     final responders = respondersRaw.map((uid, val) =>
@@ -72,13 +78,15 @@ class Incident {
 
     return Incident(
       incidentId:       doc.id,
-      incidentType:     data['incidentType']     as String? ?? 'Unknown',
-      incidentCategory: data['incidentCategory'] as String? ?? 'FIRE',
+      incidentType:     rawServiceType,
+      incidentCategory: rawServiceType,
+      displayLabel:     rawDisplayLabel,
       address:          data['address']          as String? ?? 'Unknown',
       crossStreets: data['crossStreets']  as String?,
       fireQuadrant: data['fireQuadrant']  as String?,
       emsDistrict:  data['emsDistrict']   as String?,
       units:        List<String>.from(data['units'] as List? ?? []),
+      unitCodes:    List<String>.from(data['unitCodes'] as List? ?? []),
       priority:     data['priority']      as String?,
       dispatchTime: data['dispatchTime']  as String? ?? '',
       status:       data['status']        as String? ?? 'active',
@@ -91,6 +99,16 @@ class Incident {
   }
 
   bool get isActive => status == 'active';
-  bool get isMessage => incidentType == 'MESSAGE' || incidentType == 'PRIORITY TRAFFIC';
-  bool get isPriorityMessage => incidentType == 'PRIORITY TRAFFIC';
+  String get serviceType => incidentCategory;
+  String get primaryDisplay {
+    // For non-MESSAGE types, always prefer displayLabel if present
+    if (displayLabel.isNotEmpty) return displayLabel;
+    // For MESSAGE/PRIORITY, use serviceType as fallback
+    if (serviceType == 'MESSAGE' || serviceType == 'PRIORITY TRAFFIC') return serviceType;
+    // For BOTH, show a sensible label instead of "BOTH"
+    if (serviceType == 'BOTH') return 'Multi-Agency';
+    return serviceType;
+  }
+  bool get isMessage => serviceType == 'MESSAGE' || serviceType == 'PRIORITY TRAFFIC';
+  bool get isPriorityMessage => serviceType == 'PRIORITY TRAFFIC';
 }
