@@ -21,7 +21,7 @@ workflows:
           mkdir -p Payload
           cp -r Runner.app Payload/
           zip -r Tone.ipa Payload
-          mv Tone.ipa ../../../..
+          mv Tone.ipa ../../../../app/
     artifacts:
       - app/Tone.ipa
   
