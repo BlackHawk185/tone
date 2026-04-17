@@ -7,7 +7,7 @@
       "bundleIdentifier": "com.valence.tone",
       "version": "1.0.0",
       "versionDescription": "Fire/EMS dispatch system for Pine Bluffs",
-      "downloadURL": "https://tone-b66eb.web.app/download/ios/binary",
+      "downloadURL": "https://github.com/BlackHawk185/tone/releases/latest/download/Tone.ipa",
       "localizedDescription": "Real-time incident dispatch, location tracking, and team coordination",
       "size": 62041168,
       "screenshotURLs": [],
