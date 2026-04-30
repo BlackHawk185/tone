@@ -5,25 +5,20 @@ import 'package:tone/services/auth_service.dart';
 class EventService {
   static final _db = FirebaseFirestore.instance;
 
-  /// Real-time stream of non-cancelled events within a ±24h–30d window.
+  /// Real-time stream of all events (all time, up to 30 days ahead).
+  /// Cancelled events are included so they can be shown greyed out.
   static Stream<List<CalendarEvent>> watchEvents() {
-    final since = Timestamp.fromDate(
-      DateTime.now().subtract(const Duration(hours: 24)),
-    );
     final until = Timestamp.fromDate(
       DateTime.now().add(const Duration(days: 30)),
     );
     return _db
         .collection('events')
-        .where('time', isGreaterThan: since)
         .where('time', isLessThan: until)
-        .orderBy('time')
+        .orderBy('time', descending: true)
         .snapshots()
         .map(
-          (snap) => snap.docs
-              .map(CalendarEvent.fromFirestore)
-              .where((e) => e.status != 'cancelled')
-              .toList(),
+          (snap) =>
+              snap.docs.map(CalendarEvent.fromFirestore).toList(),
         );
   }
 
