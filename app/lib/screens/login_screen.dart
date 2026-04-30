@@ -262,7 +262,6 @@ class _LoginScreenState extends State<LoginScreen>
       // Tell the autofill framework the form was submitted successfully so
       // password managers (1Password, etc.) get the save/update prompt.
       TextInput.finishAutofillContext();
-      if (mounted) context.go('/home');
     } on FirebaseAuthException catch (e) {
       setState(() => _error = _authErrorMessage(e.code));
     } on FirebaseException catch (e) {
