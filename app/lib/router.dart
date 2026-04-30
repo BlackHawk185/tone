@@ -11,7 +11,7 @@ import 'package:tone/services/auth_service.dart';
 class _AuthChangeNotifier extends ChangeNotifier {
   late final StreamSubscription<User?> _sub;
   _AuthChangeNotifier() {
-    _sub = FirebaseAuth.instance.authStateChanges().listen((_) => notifyListeners());
+    _sub = FirebaseAuth.instance.idTokenChanges().listen((_) => notifyListeners());
   }
   @override
   void dispose() {
@@ -21,6 +21,55 @@ class _AuthChangeNotifier extends ChangeNotifier {
 }
 
 final _authNotifier = _AuthChangeNotifier();
+
+class _AuthLoadingScreen extends StatelessWidget {
+  const _AuthLoadingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+  }
+}
+
+class _AuthedRoute extends StatelessWidget {
+  final Widget child;
+
+  const _AuthedRoute({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.idTokenChanges(),
+      builder: (context, authSnap) {
+        if (authSnap.connectionState == ConnectionState.waiting) {
+          return const _AuthLoadingScreen();
+        }
+
+        final user = authSnap.data;
+        if (user == null) {
+          return const _AuthLoadingScreen();
+        }
+
+        return FutureBuilder<String?>(
+          future: user.getIdToken(),
+          builder: (context, tokenSnap) {
+            if (tokenSnap.connectionState != ConnectionState.done) {
+              return const _AuthLoadingScreen();
+            }
+            if (tokenSnap.hasError || tokenSnap.data == null) {
+              return const _AuthLoadingScreen();
+            }
+            return child;
+          },
+        );
+      },
+    );
+  }
+}
 
 final appRouter = GoRouter(
   initialLocation: '/login',
@@ -45,18 +94,22 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: '/home',
-      builder: (context, state) => const HomeScreen(),
+      builder: (context, state) => const _AuthedRoute(child: HomeScreen()),
     ),
     GoRoute(
       path: '/incident/:id',
-      builder: (context, state) => IncidentScreen(
-        incidentId: state.pathParameters['id']!,
+      builder: (context, state) => _AuthedRoute(
+        child: IncidentScreen(
+          incidentId: state.pathParameters['id']!,
+        ),
       ),
     ),
     GoRoute(
       path: '/event/:id',
-      builder: (context, state) => _EventPlaceholderScreen(
-        eventId: state.pathParameters['id']!,
+      builder: (context, state) => _AuthedRoute(
+        child: _EventPlaceholderScreen(
+          eventId: state.pathParameters['id']!,
+        ),
       ),
     ),
   ],
