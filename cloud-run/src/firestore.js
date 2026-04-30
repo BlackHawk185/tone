@@ -16,9 +16,11 @@ const db = admin.firestore();
  * never touched.
  */
 async function writeIncident(incident) {
-  const docRef = db.collection('incidents').doc(incident.incidentId);
+  const docRef = db.collection('feed').doc(incident.incidentId);
 
+  const dispatchDate = new Date(incident.dispatchTime);
   const data = {
+    type:             'DISPATCH',
     incidentId:       incident.incidentId,
     incidentType:     incident.incidentType,
     incidentCategory: incident.incidentCategory || 'FIRE',
@@ -31,6 +33,7 @@ async function writeIncident(incident) {
     units:         incident.units,
     unitCodes:     incident.unitCodes  || [],
     priority:      incident.priority,
+    time:          admin.firestore.Timestamp.fromDate(dispatchDate),
     dispatchTime:  incident.dispatchTime,
     natureOfCall:  incident.natureOfCall  || null,
     narrative:     incident.narrative     || [],

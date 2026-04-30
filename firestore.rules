@@ -2,43 +2,51 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Incidents: authenticated users can read, only backend (Cloud Run) writes via Admin SDK
-    match /incidents/{incidentId} {
+    // Unified feed collection — dispatches, messages, and calendar events.
+    match /feed/{docId} {
       allow read: if request.auth != null;
-      // Authenticated users can update only the responders map or the status field
-      allow update: if request.auth != null
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['responders', 'status']);
-      // Authenticated users can create MESSAGE-type incidents
+
+      // Authenticated users can create MESSAGE or EVENT docs only.
+      // DISPATCH docs are written exclusively by the backend Admin SDK.
       allow create: if request.auth != null
-        && request.resource.data.incidentType in ['MESSAGE', 'PRIORITY TRAFFIC'];
+        && (
+          request.resource.data.type == 'MESSAGE'
+          || (
+            request.resource.data.type == 'EVENT'
+            && request.auth.uid == request.resource.data.createdBy
+          )
+        );
+
+      allow update: if request.auth != null
+        && (
+          // Responder status updates on dispatches
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['responders', 'status'])
+          // Event creator can update any field on their event
+          || (resource.data.type == 'EVENT'
+              && request.auth.uid == resource.data.createdBy)
+          // Any authenticated user can RSVP on an event
+          || (resource.data.type == 'EVENT'
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['attendees']))
+        );
+
+      // Only event creators can delete their own events
+      allow delete: if request.auth != null
+        && resource.data.type == 'EVENT'
+        && request.auth.uid == resource.data.createdBy;
     }
 
-    // User profiles: any authenticated user can read (for custom statuses),
-    // but only the owner can write their own document
+    // User profiles
     match /users/{userId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Calendar events: any authenticated user can create their own events and RSVP;
-    // only the creator can update content or cancel.
-    match /events/{eventId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null
-        && request.auth.uid == request.resource.data.createdBy;
-      allow update: if request.auth != null
-        && (
-          request.auth.uid == resource.data.createdBy
-          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendees'])
-        );
-      allow delete: if request.auth != null
-        && request.auth.uid == resource.data.createdBy;
-    }
-
-    // Config: authenticated users can read (on-call data, etc.)
+    // Config (on-call, etc.) — Admin SDK writes only
     match /config/{docId} {
       allow read: if request.auth != null;
-      allow write: if false; // Admin SDK only
+      allow write: if false;
     }
   }
 }

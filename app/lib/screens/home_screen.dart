@@ -3,7 +3,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tone/models/app_event.dart';
 import 'package:tone/models/on_call_entry.dart';
 import 'package:tone/models/user_status.dart';
-import 'package:tone/services/event_service.dart';
 import 'package:tone/services/incident_service.dart';
 import 'package:tone/services/on_call_service.dart';
 import 'package:tone/services/user_status_service.dart';
@@ -211,74 +210,60 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 Expanded(
                   child: StreamBuilder<List<AppEvent>>(
-                    stream: IncidentService.watchIncidents(),
-                    builder: (context, incidentSnap) {
-                      return StreamBuilder<List<CalendarEvent>>(
-                        stream: EventService.watchEvents(),
-                        builder: (context, eventSnap) {
-                          if (incidentSnap.connectionState ==
-                                  ConnectionState.waiting &&
-                              eventSnap.connectionState ==
-                                  ConnectionState.waiting) {
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
-                          }
-                          if (incidentSnap.hasError) {
-                            return Center(
-                              child: Text('Error: ${incidentSnap.error}'),
-                            );
-                          }
-                          final incidentEvents =
-                              (incidentSnap.data ?? []).where((e) => switch (e) {
-                                DispatchEvent d =>
-                                  d.unitCodes.any(_subscribedCodes.contains),
-                                MessageEvent() => true,
-                                CalendarEvent() => true,
-                              }).toList();
-                          final calendarEvents = eventSnap.data ?? [];
-                          final all = [
-                            ...incidentEvents,
-                            ...calendarEvents,
-                          ]..sort((a, b) => b.time.compareTo(a.time));
-                          if (all.isEmpty) {
-                            return Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(
-                                    Icons.handyman,
-                                    size: 64,
-                                    color: Colors.amber,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 24,
-                                    ),
-                                    child: Text(
-                                      "Where'd all the incidents go? Steve's probably broke something.",
-                                      style: const TextStyle(fontSize: 16),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ),
-                                ],
+                    stream: IncidentService.watchFeed(),
+                    builder: (context, snap) {
+                      if (snap.connectionState == ConnectionState.waiting) {
+                        return const Center(
+                          child: CircularProgressIndicator(),
+                        );
+                      }
+                      if (snap.hasError) {
+                        return Center(
+                          child: Text('Error: ${snap.error}'),
+                        );
+                      }
+                      final all = (snap.data ?? []).where((e) => switch (e) {
+                        DispatchEvent d =>
+                          d.unitCodes.any(_subscribedCodes.contains),
+                        MessageEvent() => true,
+                        CalendarEvent() => true,
+                      }).toList();
+                      if (all.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                Icons.handyman,
+                                size: 64,
+                                color: Colors.amber,
                               ),
-                            );
-                          }
-                          return ListView.builder(
-                            padding: const EdgeInsets.all(12),
-                            itemCount: all.length,
-                            itemBuilder: (context, index) => Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: switch (all[index]) {
-                                DispatchEvent e => IncidentCard(incident: e),
-                                MessageEvent e => MessageCard(event: e),
-                                CalendarEvent e => EventCard(event: e),
-                              },
-                            ),
-                          );
-                        },
+                              const SizedBox(height: 12),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                ),
+                                child: Text(
+                                  "Where'd all the incidents go? Steve's probably broke something.",
+                                  style: const TextStyle(fontSize: 16),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      return ListView.builder(
+                        padding: const EdgeInsets.all(12),
+                        itemCount: all.length,
+                        itemBuilder: (context, index) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: switch (all[index]) {
+                            DispatchEvent e => IncidentCard(incident: e),
+                            MessageEvent e => MessageCard(event: e),
+                            CalendarEvent e => EventCard(event: e),
+                          },
+                        ),
                       );
                     },
                   ),

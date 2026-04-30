@@ -1,18 +1,16 @@
 /**
  * migrate-incidents.js
  *
- * One-shot migration that adapts legacy incident documents to the current schema
- * expected by DispatchEvent.fromFirestore():
+ * Migrates both legacy Firestore collections into the unified `feed/` collection:
  *
- *   serviceType   — derived from incidentCategory || incidentType if missing
- *   displayLabel  — derived from natureOfCall if missing
- *   unitCodes     — defaulted to [] if missing
+ *   incidents/ → feed/  (type: DISPATCH or MESSAGE, adds `time` Timestamp)
+ *   events/    → feed/  (type: EVENT, time Timestamp already present)
  *
  * Run from the repo root:
  *   node migrate-incidents.js [--dry-run]
  *
- * Requires GOOGLE_APPLICATION_CREDENTIALS or Application Default Credentials
- * (i.e. `firebase login` / `gcloud auth application-default login`).
+ * Requires Application Default Credentials:
+ *   firebase login  OR  gcloud auth application-default login
  */
 
 const admin = require('firebase-admin');
@@ -22,95 +20,119 @@ const DRY_RUN = process.argv.includes('--dry-run');
 admin.initializeApp({ projectId: 'tone-b66eb' });
 const db = admin.firestore();
 
-/**
- * Derives serviceType using the same logic as cloud-run/src/firestore.js:
- *   incident.serviceType || incident.incidentCategory || incident.incidentType
- *
- * Normalises to one of: FIRE | EMS | BOTH | MESSAGE | PRIORITY TRAFFIC | UNKNOWN
- */
-function deriveServiceType(data) {
-  const raw = (
-    data.serviceType ||
-    data.incidentCategory ||
-    data.incidentType ||
-    ''
-  ).trim().toUpperCase();
-
-  if (!raw) return 'UNKNOWN';
-
-  // Normalise legacy category values that map to known service types
-  if (raw === 'FIRE' || raw === 'EMS' || raw === 'BOTH') return raw;
-  if (raw === 'MESSAGE' || raw === 'PRIORITY TRAFFIC') return raw;
-
-  // Legacy free-text incidentType that implies a service type
-  if (/\bfire\b|structure|wildland|vehicle fire|brush/i.test(raw)) return 'FIRE';
-  if (/\bems\b|medical|trauma|cardiac|respiratory/i.test(raw)) return 'EMS';
-
-  // Keep whatever the raw value was — better than UNKNOWN
-  return raw;
+function deriveType(data) {
+  const svc = (data.serviceType || data.incidentCategory || data.incidentType || '').toUpperCase();
+  if (svc === 'MESSAGE' || svc === 'PRIORITY TRAFFIC') return 'MESSAGE';
+  return 'DISPATCH';
 }
 
-async function migrate() {
-  console.log(`Mode: ${DRY_RUN ? 'DRY RUN (no writes)' : 'LIVE'}\n`);
+function toTimestamp(isoString) {
+  if (!isoString) return admin.firestore.Timestamp.now();
+  return admin.firestore.Timestamp.fromDate(new Date(isoString));
+}
 
-  const snapshot = await db.collection('incidents').get();
-  console.log(`Found ${snapshot.size} incident(s) to inspect.\n`);
+async function commitBatch(batch, count, label) {
+  if (!DRY_RUN && count > 0) {
+    await batch.commit();
+    console.log(`  → Committed ${count} ${label} doc(s).`);
+  }
+}
 
-  let updated = 0;
-  let skipped = 0;
-  const batch = db.batch();
-  let batchCount = 0;
+async function migrateIncidents() {
+  const snap = await db.collection('incidents').get();
+  console.log(`incidents/: ${snap.size} docs`);
 
-  for (const doc of snapshot.docs) {
+  let written = 0, skipped = 0, batchCount = 0;
+  let batch = db.batch();
+
+  for (const doc of snap.docs) {
     const data = doc.data();
-    const patch = {};
 
-    // ── serviceType ──────────────────────────────────────────────────────────
-    if (!data.serviceType) {
-      patch.serviceType = deriveServiceType(data);
-    }
-
-    // ── displayLabel ─────────────────────────────────────────────────────────
-    if (data.displayLabel === undefined || data.displayLabel === null) {
-      patch.displayLabel = (data.natureOfCall || '').trim();
-    }
-
-    // ── unitCodes ─────────────────────────────────────────────────────────────
-    if (!Array.isArray(data.unitCodes)) {
-      patch.unitCodes = [];
-    }
-
-    if (Object.keys(patch).length === 0) {
+    // Check if already migrated
+    const existing = await db.collection('feed').doc(doc.id).get();
+    if (existing.exists && existing.data().type) {
       skipped++;
       continue;
     }
 
-    console.log(`[${doc.id}] patching:`, patch);
+    const type = deriveType(data);
+    const isPriority = (data.serviceType || '').toUpperCase() === 'PRIORITY TRAFFIC';
+    const timeTs = data.dispatchTime ? toTimestamp(data.dispatchTime) : admin.firestore.Timestamp.now();
+
+    const feedDoc = {
+      ...data,
+      type,
+      time: timeTs,
+      ...(type === 'MESSAGE' ? {
+        isPriority,
+        text: data.displayLabel || data.natureOfCall || '',
+        senderName: data.address || 'Unknown',
+      } : {}),
+    };
+
+    console.log(`  [${doc.id}] incidents → feed (type=${type})`);
 
     if (!DRY_RUN) {
-      batch.set(doc.ref, patch, { merge: true });
+      batch.set(db.collection('feed').doc(doc.id), feedDoc);
       batchCount++;
-
-      // Firestore batches are capped at 500 operations
       if (batchCount === 499) {
-        await batch.commit();
-        console.log('  → Committed batch of 499.');
+        await commitBatch(batch, batchCount, 'incident');
+        batch = db.batch();
         batchCount = 0;
       }
     }
-
-    updated++;
+    written++;
   }
 
-  if (!DRY_RUN && batchCount > 0) {
-    await batch.commit();
-    console.log(`  → Committed final batch of ${batchCount}.`);
-  }
-
-  console.log(`\nDone. Updated: ${updated}  |  Already current: ${skipped}`);
+  await commitBatch(batch, batchCount, 'incident');
+  console.log(`incidents/: written=${written}, skipped=${skipped}\n`);
 }
 
-migrate().catch((err) => {
+async function migrateEvents() {
+  const snap = await db.collection('events').get();
+  console.log(`events/: ${snap.size} docs`);
+
+  let written = 0, skipped = 0, batchCount = 0;
+  let batch = db.batch();
+
+  for (const doc of snap.docs) {
+    const data = doc.data();
+
+    const existing = await db.collection('feed').doc(doc.id).get();
+    if (existing.exists && existing.data().type) {
+      skipped++;
+      continue;
+    }
+
+    const feedDoc = { ...data, type: 'EVENT' };
+
+    console.log(`  [${doc.id}] events → feed (type=EVENT)`);
+
+    if (!DRY_RUN) {
+      batch.set(db.collection('feed').doc(doc.id), feedDoc);
+      batchCount++;
+      if (batchCount === 499) {
+        await commitBatch(batch, batchCount, 'event');
+        batch = db.batch();
+        batchCount = 0;
+      }
+    }
+    written++;
+  }
+
+  await commitBatch(batch, batchCount, 'event');
+  console.log(`events/: written=${written}, skipped=${skipped}\n`);
+}
+
+async function main() {
+  console.log(`Mode: ${DRY_RUN ? 'DRY RUN (no writes)' : 'LIVE'}\n`);
+  await migrateIncidents();
+  await migrateEvents();
+  console.log('Migration complete.');
+}
+
+main().catch((err) => {
   console.error('Migration failed:', err);
   process.exit(1);
 });
+

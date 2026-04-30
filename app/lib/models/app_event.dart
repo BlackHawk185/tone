@@ -73,8 +73,10 @@ final class DispatchEvent extends AppEvent {
         .toList();
     return DispatchEvent(
       id: doc.id,
-      time: DateTime.tryParse(data['dispatchTime'] as String? ?? '') ??
-          DateTime.now(),
+      time: data['time'] != null
+          ? (data['time'] as Timestamp).toDate()
+          : DateTime.tryParse(data['dispatchTime'] as String? ?? '') ??
+              DateTime.now(),
       displayLabel: (data['displayLabel'] as String? ?? '').trim(),
       serviceType: rawServiceType,
       address: data['address'] as String? ?? 'Unknown',
@@ -120,13 +122,15 @@ final class MessageEvent extends AppEvent {
     final data = doc.data() as Map<String, dynamic>;
     return MessageEvent(
       id: doc.id,
-      time: DateTime.tryParse(data['dispatchTime'] as String? ?? '') ??
-          DateTime.now(),
+      time: data['time'] != null
+          ? (data['time'] as Timestamp).toDate()
+          : DateTime.tryParse(data['dispatchTime'] as String? ?? '') ??
+              DateTime.now(),
       text: (data['displayLabel'] as String?)?.trim() ??
           (data['natureOfCall'] as String?)?.trim() ??
           '',
       senderName: data['address'] as String? ?? 'Unknown',
-      isPriority:
+      isPriority: data['isPriority'] as bool? ??
           (data['serviceType'] as String? ?? '') == 'PRIORITY TRAFFIC',
       status: data['status'] as String? ?? 'active',
     );
@@ -187,9 +191,15 @@ final class CalendarEvent extends AppEvent {
   }
 }
 
-/// Routes a document from the `incidents/` collection to the correct subtype.
-AppEvent appEventFromIncidentDoc(DocumentSnapshot doc) {
+/// Routes a document from the `feed/` collection to the correct subtype.
+/// Uses explicit `type` field first; falls back to legacy `serviceType` for old docs.
+AppEvent appEventFromFeedDoc(DocumentSnapshot doc) {
   final data = doc.data() as Map<String, dynamic>;
+  final type = (data['type'] as String? ?? '').toUpperCase();
+  if (type == 'EVENT') return CalendarEvent.fromFirestore(doc);
+  if (type == 'MESSAGE') return MessageEvent.fromFirestore(doc);
+  if (type == 'DISPATCH') return DispatchEvent.fromFirestore(doc);
+  // Legacy fallback: route by serviceType
   final serviceType = (data['serviceType'] as String? ?? '').toUpperCase();
   if (serviceType == 'MESSAGE' || serviceType == 'PRIORITY TRAFFIC') {
     return MessageEvent.fromFirestore(doc);

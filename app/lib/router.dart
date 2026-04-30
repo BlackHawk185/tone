@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart';
 import 'package:tone/screens/login_screen.dart';
@@ -5,8 +7,24 @@ import 'package:tone/screens/home_screen.dart';
 import 'package:tone/screens/incident_screen.dart';
 import 'package:tone/services/auth_service.dart';
 
+/// Bridges a Stream into a ChangeNotifier so GoRouter refreshes on auth changes.
+class _AuthChangeNotifier extends ChangeNotifier {
+  late final StreamSubscription<User?> _sub;
+  _AuthChangeNotifier() {
+    _sub = FirebaseAuth.instance.authStateChanges().listen((_) => notifyListeners());
+  }
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
+  }
+}
+
+final _authNotifier = _AuthChangeNotifier();
+
 final appRouter = GoRouter(
   initialLocation: '/login',
+  refreshListenable: _authNotifier,
   redirect: (context, state) {
     final isLoggedIn = AuthService.isLoggedIn;
     final loc = state.matchedLocation;
