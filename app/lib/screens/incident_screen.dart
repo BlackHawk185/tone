@@ -204,7 +204,7 @@ class _IncidentDetailState extends State<_IncidentDetail> {
                             ? () => openMap(incident.lat!, incident.lng!)
                             : null,
                       ),
-                      LiveElapsed(dispatchTime: incident.dispatchTime),
+                      LiveElapsed(time: DateTime.tryParse(incident.dispatchTime) ?? DateTime.now()),
                       if (incident.priority != null)
                         InfoTile(
                           icon: Icons.flag,

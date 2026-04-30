@@ -2,13 +2,16 @@ import 'dart:async';import 'dart:io' show Platform;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tone/models/app_event.dart';
 import 'package:tone/models/user_status.dart';
 import 'package:tone/services/auth_service.dart';
+import 'package:tone/services/event_service.dart';
 import 'package:tone/services/user_status_service.dart';
 import 'package:tone/utils/text_styles.dart';
 import 'package:tone/widgets/dialog_title_bar.dart';
@@ -64,19 +67,21 @@ class SettingsMenu extends StatelessWidget {
   }
 
   static void _showSettingsModal(BuildContext context) {
+    final outerContext = context;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => const _SettingsSheet(),
+      builder: (ctx) => _SettingsSheet(outerContext: outerContext),
     );
   }
 }
 
 class _SettingsSheet extends StatefulWidget {
-  const _SettingsSheet();
+  final BuildContext outerContext;
+  const _SettingsSheet({required this.outerContext});
 
   @override
   State<_SettingsSheet> createState() => _SettingsSheetState();
@@ -534,6 +539,18 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.event),
+              title: const Text('Create Event'),
+              subtitle: const Text(
+                'Schedule a training, drill, standby, or meeting',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+              onTap: () => _showCreateEventDialog(context),
+            ),
+            const Divider(),
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.share),
               title: const Text('Share App'),
               onTap: () {
@@ -565,6 +582,14 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       context: context,
       useRootNavigator: false,
       builder: (ctx) => const _SetStatusDialog(),
+    );
+  }
+
+  void _showCreateEventDialog(BuildContext context) {
+    showDialog(
+      context: widget.outerContext,
+      useRootNavigator: false,
+      builder: (ctx) => const _CreateEventDialog(),
     );
   }
 
@@ -813,6 +838,222 @@ class _SetStatusDialogState extends State<_SetStatusDialog> {
                   Navigator.pop(context);
                 },
           child: const Text('Set'),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Create Event dialog ──
+
+class _CreateEventDialog extends StatefulWidget {
+  const _CreateEventDialog();
+
+  @override
+  State<_CreateEventDialog> createState() => _CreateEventDialogState();
+}
+
+class _CreateEventDialogState extends State<_CreateEventDialog> {
+  final _titleController = TextEditingController();
+  final _locationController = TextEditingController();
+  final _notesController = TextEditingController();
+  final _durationController = TextEditingController();
+
+  Color _selectedColor = const Color(0xFF3949AB);
+  DateTime? _scheduledTime;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _locationController.dispose();
+    _notesController.dispose();
+    _durationController.dispose();
+    super.dispose();
+  }
+
+  bool get _valid =>
+      _titleController.text.trim().isNotEmpty && _scheduledTime != null;
+
+  Future<void> _pickDateTime() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      useRootNavigator: false,
+      initialDate: now.add(const Duration(days: 1)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      useRootNavigator: false,
+      initialTime: const TimeOfDay(hour: 18, minute: 0),
+    );
+    if (time == null || !mounted) return;
+    setState(() {
+      _scheduledTime = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+    });
+  }
+
+  Future<void> _submit() async {
+    if (!_valid) return;
+    setState(() { _saving = true; _error = null; });
+    try {
+      await EventService.createEvent(
+        title: _titleController.text.trim(),
+        color: _selectedColor.value,
+        time: _scheduledTime!,
+        durationMin: int.tryParse(_durationController.text.trim()),
+        location: _locationController.text.trim().isNotEmpty
+            ? _locationController.text.trim()
+            : null,
+        notes: _notesController.text.trim().isNotEmpty
+            ? _notesController.text.trim()
+            : null,
+      );
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) setState(() { _saving = false; _error = e.toString(); });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final timeLabel = _scheduledTime == null
+        ? 'Pick date & time'
+        : '${_scheduledTime!.month}/${_scheduledTime!.day}/${_scheduledTime!.year}  '
+            '${TimeOfDay.fromDateTime(_scheduledTime!).format(context)}';
+
+    return AlertDialog(
+      title: DialogTitleBar(
+        title: 'Create Event',
+        onClose: () => Navigator.pop(context),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _titleController,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Title',
+                hintText: '🔥 Tuesday Drill',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () => showDialog(
+                context: context,
+                useRootNavigator: false,
+                builder: (_) => AlertDialog(
+                  title: const Text('Pick a color'),
+                  content: SingleChildScrollView(
+                    child: ColorPicker(
+                      pickerColor: _selectedColor,
+                      onColorChanged: (c) => setState(() => _selectedColor = c),
+                      pickerAreaHeightPercent: 0.7,
+                      enableAlpha: false,
+                      labelTypes: const [],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Done'),
+                    ),
+                  ],
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: _selectedColor,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: _selectedColor.withAlpha(120),
+                          blurRadius: 6,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Text(
+                    'Event color',
+                    style: TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.edit, size: 14, color: Colors.grey),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _pickDateTime,
+              icon: const Icon(Icons.calendar_today, size: 16),
+              label: Text(timeLabel),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _durationController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Duration (minutes, optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _locationController,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Location (optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _notesController,
+              textCapitalization: TextCapitalization.sentences,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Notes (optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: (_valid && !_saving) ? _submit : null,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Create'),
         ),
       ],
     );

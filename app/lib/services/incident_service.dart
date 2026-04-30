@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:tone/models/app_event.dart';
 import 'package:tone/models/incident.dart';
 import 'package:tone/services/auth_service.dart';
 
@@ -6,13 +7,13 @@ class IncidentService {
   static final _db = FirebaseFirestore.instance;
 
   /// Real-time stream of all incidents ordered by dispatch time descending
-  static Stream<List<Incident>> watchIncidents() {
+  static Stream<List<AppEvent>> watchIncidents() {
     return _db
         .collection('incidents')
         .orderBy('dispatchTime', descending: true)
         .limit(50)
         .snapshots()
-        .map((snap) => snap.docs.map(Incident.fromFirestore).toList());
+        .map((snap) => snap.docs.map(appEventFromIncidentDoc).toList());
   }
 
   /// Real-time stream of a single incident

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:tone/models/incident.dart';
+import 'package:tone/models/app_event.dart';
 import 'package:tone/models/response_role.dart';
 import 'package:tone/services/auth_service.dart';
 import 'package:tone/services/location_service.dart';
@@ -12,7 +12,7 @@ import 'package:tone/widgets/live_elapsed.dart';
 import 'package:tone/widgets/pulsing_dot.dart';
 
 class IncidentCard extends StatefulWidget {
-  final Incident incident;
+  final DispatchEvent incident;
   const IncidentCard({super.key, required this.incident});
 
   @override
@@ -76,7 +76,7 @@ class _IncidentCardState extends State<IncidentCard>
             borderRadius: BorderRadius.circular(14),
           ),
           child: InkWell(
-            onTap: () => context.push('/incident/${incident.incidentId}'),
+            onTap: () => context.push('/incident/${incident.id}'),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -131,19 +131,7 @@ class _IncidentCardState extends State<IncidentCard>
                                       letterSpacing: 0.6,
                                     ),
                                   ),
-                                  if (incident.isMessage)
-                                    TextSpan(
-                                      text: ' — ${incident.address}',
-                                      style: TextStyle(
-                                        color: isActive
-                                            ? Colors.white70
-                                            : Colors.grey.shade500,
-                                        fontWeight: FontWeight.w500,
-                                        fontSize: 11,
-                                        letterSpacing: 0.3,
-                                      ),
-                                    )
-                                  else if (incident.serviceType == 'BOTH' ||
+                                  if (incident.serviceType == 'BOTH' ||
                                       (incident.serviceType.isNotEmpty &&
                                           incident.serviceType !=
                                               incident.primaryDisplay))
@@ -165,7 +153,7 @@ class _IncidentCardState extends State<IncidentCard>
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if (!isActive && !incident.isMessage)
+                          if (!isActive)
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 6,
@@ -194,19 +182,7 @@ class _IncidentCardState extends State<IncidentCard>
                 // Body
                 Padding(
                   padding: const EdgeInsets.all(10),
-                  child: incident.isMessage
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              incident.primaryDisplay,
-                              style: const TextStyle(fontSize: 14, height: 1.4),
-                            ),
-                            const SizedBox(height: 8),
-                            LiveElapsed(dispatchTime: incident.dispatchTime),
-                          ],
-                        )
-                      : Column(
+                  child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             // Info tiles (single row)
@@ -323,7 +299,7 @@ class _IncidentCardState extends State<IncidentCard>
                                   ),
                                   const SizedBox(width: 8),
                                   LiveElapsed(
-                                    dispatchTime: incident.dispatchTime,
+                                    time: incident.time,
                                   ),
                                 ],
                               ),

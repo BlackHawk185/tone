@@ -1,4 +1,5 @@
 import 'package:go_router/go_router.dart';
+import 'package:flutter/material.dart';
 import 'package:tone/screens/login_screen.dart';
 import 'package:tone/screens/home_screen.dart';
 import 'package:tone/screens/incident_screen.dart';
@@ -34,5 +35,24 @@ final appRouter = GoRouter(
         incidentId: state.pathParameters['id']!,
       ),
     ),
+    GoRoute(
+      path: '/event/:id',
+      builder: (context, state) => _EventPlaceholderScreen(
+        eventId: state.pathParameters['id']!,
+      ),
+    ),
   ],
 );
+
+class _EventPlaceholderScreen extends StatelessWidget {
+  final String eventId;
+  const _EventPlaceholderScreen({required this.eventId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Event')),
+      body: const Center(child: Text('Event details coming soon')),
+    );
+  }
+}
