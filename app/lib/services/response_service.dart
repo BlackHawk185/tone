@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ResponseService {
   static final _db = FirebaseFirestore.instance;
+  static const _collection = 'feed';
 
   /// Update the current user's response on an incident.
   static Future<void> updateStatus({
@@ -19,7 +20,7 @@ class ResponseService {
     };
     if (distanceMiles != null) data['distanceMiles'] = distanceMiles;
     if (etaMinutes != null) data['etaMinutes'] = etaMinutes;
-    await _db.collection('incidents').doc(incidentId).update({
+    await _db.collection(_collection).doc(incidentId).update({
       'responders.$uid': data,
     });
   }
@@ -30,7 +31,7 @@ class ResponseService {
     required String uid,
     required String role,
   }) async {
-    await _db.collection('incidents').doc(incidentId).update({
+    await _db.collection(_collection).doc(incidentId).update({
       'responders.$uid.role': role,
       'responders.$uid.updatedAt': DateTime.now().toIso8601String(),
     });
@@ -43,7 +44,7 @@ class ResponseService {
     required double distanceMiles,
     required int etaMinutes,
   }) async {
-    await _db.collection('incidents').doc(incidentId).update({
+    await _db.collection(_collection).doc(incidentId).update({
       'responders.$uid.distanceMiles': distanceMiles,
       'responders.$uid.etaMinutes': etaMinutes,
       'responders.$uid.updatedAt': DateTime.now().toIso8601String(),
@@ -55,7 +56,7 @@ class ResponseService {
     required String incidentId,
     required String uid,
   }) async {
-    await _db.collection('incidents').doc(incidentId).update({
+    await _db.collection(_collection).doc(incidentId).update({
       'responders.$uid': FieldValue.delete(),
     });
   }
