@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tone/models/app_event.dart';
 import 'package:tone/models/on_call_entry.dart';
 import 'package:tone/models/user_status.dart';
+import 'package:tone/services/auth_service.dart';
 import 'package:tone/services/incident_service.dart';
 import 'package:tone/services/on_call_service.dart';
 import 'package:tone/services/user_status_service.dart';
@@ -218,8 +219,18 @@ class _HomeScreenState extends State<HomeScreen> {
                         );
                       }
                       if (snap.hasError) {
+                        final user = AuthService.currentUser;
                         return Center(
-                          child: Text('Error: ${snap.error}'),
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              'Feed read failed [20260429b]\n'
+                              'signedIn=${user != null} '
+                              'uid=${user?.uid ?? 'none'}\n\n'
+                              'Error: ${snap.error}',
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
                         );
                       }
                       final all = (snap.data ?? []).where((e) => switch (e) {
