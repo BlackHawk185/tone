@@ -5,24 +5,40 @@ const admin = require('firebase-admin');
 admin.initializeApp();
 
 /**
- * Triggered when a new incident document is created in Firestore.
- * Sends a high-priority FCM push notification to the 'dispatch' topic,
- * which all app users subscribe to on login.
+ * Triggered when a new feed document is created in Firestore.
+ * Sends a high-priority FCM push notification to the appropriate topic,
+ * which app users subscribe to based on their channel settings.
  */
-exports.onNewIncident = onDocumentCreated('incidents/{incidentId}', async (event) => {
+exports.onNewIncident = onDocumentCreated('feed/{eventId}', async (event) => {
   const incident = event.data.data();
-  const incidentId = event.params.incidentId;
+  const incidentId = incident?.incidentId || event.params.eventId;
 
   if (!incident) {
     console.error('No incident data found in event');
     return;
   }
 
-  const isMessage = incident.incidentType === 'MESSAGE';
-  const isPriorityMessage = incident.incidentType === 'PRIORITY TRAFFIC';
+  const explicitType = String(incident.type || '').toUpperCase();
+  const rawServiceType = String(
+    incident.serviceType || incident.incidentCategory || incident.incidentType || '',
+  ).toUpperCase();
+  const isPriorityMessage =
+    incident.isPriority === true || rawServiceType === 'PRIORITY TRAFFIC';
+  const isMessage =
+    explicitType === 'MESSAGE' || rawServiceType === 'MESSAGE' || isPriorityMessage;
+
+  if (explicitType === 'EVENT') {
+    console.log(`[FCM] Skipping calendar event ${incidentId}`);
+    return;
+  }
+
   const unitCodes = incident.unitCodes || [];
-  const serviceType = incident.serviceType || incident.incidentCategory || incident.incidentType || '';
-  const displayLabel = incident.displayLabel || incident.natureOfCall || '';
+  const serviceType = isPriorityMessage
+    ? 'PRIORITY TRAFFIC'
+    : isMessage
+      ? 'MESSAGE'
+      : rawServiceType;
+  const displayLabel = incident.displayLabel || incident.natureOfCall || incident.text || '';
 
   // Determine FCM topic prefix based on message type
   let topicPrefix;
@@ -42,8 +58,14 @@ exports.onNewIncident = onDocumentCreated('incidents/{incidentId}', async (event
     : [`${topicPrefix}_general`];
 
   // Build notification title/body for iOS APNS alert
-  const title = isPriorityMessage ? `\u26a0 ${incident.address}` : isMessage ? `${incident.address}` : `TONE: ${displayLabel || serviceType}`;
-  const body = (isMessage || isPriorityMessage) ? (incident.natureOfCall || '') : (incident.address || '');
+  const title = isPriorityMessage
+    ? `\u26a0 ${incident.address || displayLabel || 'Priority Traffic'}`
+    : isMessage
+      ? `${incident.address || incident.senderName || 'Message'}`
+      : `TONE: ${displayLabel || serviceType}`;
+  const body = (isMessage || isPriorityMessage)
+    ? (incident.natureOfCall || incident.text || displayLabel || '')
+    : (incident.address || '');
 
   // Data-only message (no top-level `notification` key) so Android always
   // delivers to DispatchMessagingService.onMessageReceived, even when
@@ -55,7 +77,7 @@ exports.onNewIncident = onDocumentCreated('incidents/{incidentId}', async (event
         topic,
         data: {
           incidentId,
-          incidentType: incident.incidentType || '',
+          incidentType: serviceType,
           serviceType,
           displayLabel,
           channel: topic,
