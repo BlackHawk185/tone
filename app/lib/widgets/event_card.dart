@@ -44,8 +44,13 @@ class _EventCardState extends State<EventCard>
   Widget build(BuildContext context) {
     final event = widget.event;
     final eventColor = Color(event.color);
-    final isDone = event.status == 'completed' || event.status == 'cancelled';
-    final headerColor = isDone ? Colors.grey.withAlpha(60) : eventColor.withAlpha(200);
+    final isDone = event.isInactive;
+    final isActive = event.isActive;
+    final headerColor = isDone
+        ? Colors.grey.withAlpha(60)
+        : isActive
+            ? eventColor
+            : eventColor.withAlpha(200);
 
     return SlideTransition(
       position: _slideAnim,
@@ -101,9 +106,29 @@ class _EventCardState extends State<EventCard>
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            event.status.toUpperCase(),
+                            event.status == 'cancelled' ? 'CANCELLED' : 'ENDED',
                             style: TextStyle(
                               color: Colors.grey.shade400,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        )
+                      else if (isActive)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withAlpha(50),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'ACTIVE',
+                            style: TextStyle(
+                              color: Colors.white,
                               fontSize: 9,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.5,

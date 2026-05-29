@@ -8,7 +8,7 @@ set -euo pipefail
 # To create it (one-time):
 #   gcloud scheduler jobs create http renew-gmail-watch \
 #     --schedule="0 0 */6 * *" \
-#     --uri="https://tone-dispatch-listener-nhbnibjr5a-uc.a.run.app/renew-watch" \
+#     --uri="https://tone-dispatch-listener-323826101860.us-central1.run.app/renew-watch" \
 #     --http-method=POST \
 #     --location=us-central1
 gcloud run deploy tone-dispatch-listener \

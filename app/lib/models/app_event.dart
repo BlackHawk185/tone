@@ -151,8 +151,9 @@ final class CalendarEvent extends AppEvent {
   final double? lng;
   final String? notes;
   final String createdBy;
-  final String status; // upcoming | active | completed | cancelled
+  final String status; // cancelled | (anything else is time-derived)
   final Map<String, String> attendees; // uid → going | maybe | not_going
+  final List<String> notifyUnitCodes; // agency codes to notify when event is created
 
   CalendarEvent({
     required this.id,
@@ -167,9 +168,20 @@ final class CalendarEvent extends AppEvent {
     required this.createdBy,
     required this.status,
     this.attendees = const {},
+    this.notifyUnitCodes = const [],
   });
 
-  bool get isUpcoming => time.isAfter(DateTime.now());
+  /// The effective duration — matches the 30-minute floor enforced at creation.
+  int get _effectiveDuration => (durationMin != null && durationMin! > 0) ? durationMin! : 30;
+
+  DateTime get endTime => time.add(Duration(minutes: _effectiveDuration));
+
+  bool get isFuture => time.isAfter(DateTime.now());
+  bool get isActive => !isFuture && DateTime.now().isBefore(endTime);
+  bool get isPast => DateTime.now().isAfter(endTime);
+
+  /// True when the card should be rendered as inactive (greyed out).
+  bool get isInactive => isPast || status == 'cancelled';
 
   factory CalendarEvent.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -187,6 +199,7 @@ final class CalendarEvent extends AppEvent {
       createdBy: data['createdBy'] as String? ?? '',
       status: data['status'] as String? ?? 'upcoming',
       attendees: attendeesRaw.map((k, v) => MapEntry(k, v as String)),
+      notifyUnitCodes: List<String>.from(data['notifyUnitCodes'] as List? ?? []),
     );
   }
 }

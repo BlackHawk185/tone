@@ -234,3 +234,6 @@ exports.syncOnCall = onSchedule('every 10 minutes', async (_event) => {
     console.error('[WhenIWork] Sync failed:', err);
   }
 });
+
+// Active/inactive state for events is computed client-side from
+// event.time + event.durationMin — no scheduled status write-back needed.

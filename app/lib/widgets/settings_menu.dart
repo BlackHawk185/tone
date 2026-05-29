@@ -863,6 +863,16 @@ class _CreateEventDialogState extends State<_CreateEventDialog> {
   DateTime? _scheduledTime;
   bool _saving = false;
   String? _error;
+  List<String> _subscribedCodes = [];
+  final Set<String> _selectedCodes = {};
+
+  @override
+  void initState() {
+    super.initState();
+    UnitPrefs.getSubscribedUnitCodes().then((codes) {
+      if (mounted) setState(() => _subscribedCodes = codes);
+    });
+  }
 
   @override
   void dispose() {
@@ -918,6 +928,7 @@ class _CreateEventDialogState extends State<_CreateEventDialog> {
         notes: _notesController.text.trim().isNotEmpty
             ? _notesController.text.trim()
             : null,
+        notifyUnitCodes: _selectedCodes.toList(),
       );
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -1037,6 +1048,36 @@ class _CreateEventDialogState extends State<_CreateEventDialog> {
                 border: OutlineInputBorder(),
               ),
             ),
+            if (_subscribedCodes.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Notify agencies',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: _subscribedCodes.map((code) {
+                  final selected = _selectedCodes.contains(code);
+                  return FilterChip(
+                    label: Text(
+                      UnitPrefs.labelFor(code),
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    selected: selected,
+                    onSelected: (val) => setState(() {
+                      if (val) {
+                        _selectedCodes.add(code);
+                      } else {
+                        _selectedCodes.remove(code);
+                      }
+                    }),
+                    visualDensity: VisualDensity.compact,
+                  );
+                }).toList(),
+              ),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 8),
               Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),

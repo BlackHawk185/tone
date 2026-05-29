@@ -15,6 +15,10 @@ class EventService {
         .map((doc) => doc.exists ? CalendarEvent.fromFirestore(doc) : null);
   }
 
+  // Minimum event duration in minutes. Enforced silently — values below this
+  // are clamped rather than rejected so the UI never needs to validate it.
+  static const int _minDurationMin = 30;
+
   /// Create a new event in the unified feed. Returns the new document ID.
   static Future<String> createEvent({
     required String title,
@@ -25,16 +29,22 @@ class EventService {
     double? lat,
     double? lng,
     String? notes,
+    List<String> notifyUnitCodes = const [],
   }) async {
     final user = AuthService.currentUser;
     if (user == null) throw StateError('Not authenticated');
+    // Always store a duration so the auto-complete function can determine the
+    // end time. Clamp to the minimum — never allow sub-30-minute events.
+    final effectiveDuration = (durationMin == null || durationMin < _minDurationMin)
+        ? _minDurationMin
+        : durationMin;
     final docRef = _db.collection(_collection).doc();
     await docRef.set({
       'type': 'EVENT',
       'title': title,
       'color': color,
       'time': Timestamp.fromDate(time),
-      if (durationMin != null) 'durationMin': durationMin,
+      'durationMin': effectiveDuration,
       if (location != null) 'location': location,
       if (lat != null) 'lat': lat,
       if (lng != null) 'lng': lng,
@@ -42,6 +52,7 @@ class EventService {
       'createdBy': user.uid,
       'status': 'upcoming',
       'attendees': <String, dynamic>{},
+      if (notifyUnitCodes.isNotEmpty) 'notifyUnitCodes': notifyUnitCodes,
       'createdAt': FieldValue.serverTimestamp(),
     });
     return docRef.id;
