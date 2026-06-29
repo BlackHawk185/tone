@@ -393,16 +393,19 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 _buildTopActionButton(
                   icon: Icons.edit_note,
                   label: 'Status',
+                  color: Colors.blue.shade600,
                   onTap: () => _showSetStatusDialog(context),
                 ),
                 _buildTopActionButton(
                   icon: Icons.share,
                   label: 'Share',
+                  color: Colors.orange.shade600,
                   onTap: () => _showShareDialog(context),
                 ),
                 _buildTopActionButton(
                   icon: Icons.logout,
                   label: 'Sign Out',
+                  color: Colors.red.shade600,
                   onTap: () async {
                     Navigator.pop(context);
                     await AuthService.signOut();
@@ -456,7 +459,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                           ),
                           GestureDetector(
                             onTap: () => _removeChannel(code),
-                            child: const Icon(Icons.close, size: 16, color: Colors.grey),
+                            child: Icon(Icons.close, size: 20, color: Colors.red.shade600),
                           ),
                         ],
                       ),
@@ -476,6 +479,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                       return SwitchListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         secondary: Icon(ch.value.icon, size: 18),
                         title: Text(ch.value.label, style: const TextStyle(fontSize: 13)),
                         value: _subscriptions[topicKey] ?? false,
@@ -502,6 +506,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             SwitchListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               secondary: const Icon(Icons.record_voice_over, size: 18),
               title: const Text('TTS Primer', style: TextStyle(fontSize: 13)),
               subtitle: const Text(
@@ -562,6 +567,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   Widget _buildTopActionButton({
     required IconData icon,
     required String label,
+    required Color color,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
@@ -573,7 +579,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: Colors.grey.shade700,
+              color: color,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: Colors.white, size: 24),
