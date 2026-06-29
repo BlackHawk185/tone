@@ -358,9 +358,13 @@ class MainActivity : FlutterActivity() {
         alertLooping = true
         alertHandler = Handler(Looper.getMainLooper())
 
+        // Check if TTS primer is enabled in SharedPreferences
+        val prefs = getSharedPreferences("flutter.tts_primer_enabled", MODE_PRIVATE)
+        val ttsPrimerEnabled = prefs.getBoolean("flutter.tts_primer_enabled", true)
+
         // Speech once as primer, then thrums only
-        Log.d("Tone", "startAlertSequence: ttsReady=$ttsReady, speech='$speechText'")
-        if (ttsReady) {
+        Log.d("Tone", "startAlertSequence: ttsReady=$ttsReady, ttsPrimerEnabled=$ttsPrimerEnabled, speech='$speechText'")
+        if (ttsReady && ttsPrimerEnabled) {
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     Log.d("Tone", "TTS onStart: $utteranceId")
@@ -378,7 +382,11 @@ class MainActivity : FlutterActivity() {
             val speakResult = tts?.speak(speechText, TextToSpeech.QUEUE_FLUSH, null, "alert_cycle")
             Log.d("Tone", "TTS speak result: $speakResult")
         } else {
-            Log.w("Tone", "TTS not ready, skipping speech")
+            if (ttsReady && !ttsPrimerEnabled) {
+                Log.w("Tone", "TTS primer disabled, skipping speech")
+            } else {
+                Log.w("Tone", "TTS not ready, skipping speech")
+            }
             playThrumPattern()
         }
     }

@@ -109,6 +109,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   final Map<String, bool> _subscriptions = {};
   bool _loaded = false;
 
+  /// TTS primer ("Dispatch received" speech) toggle — default enabled
+  bool _ttsPrimerEnabled = true;
+
   /// Which test tone is currently looping (null = none playing).
   String? _activeTestLabel;
   Timer? _testLoopTimer;
@@ -262,6 +265,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     _subscribedCodes = prefs.getStringList('subscribed_unit_codes') ?? [];
+    _ttsPrimerEnabled = prefs.getBool('tts_primer_enabled') ?? true;
 
     for (final code in _subscribedCodes) {
       for (final type in _channelTypes.keys) {
@@ -500,7 +504,29 @@ class _SettingsSheetState extends State<_SettingsSheet> {
 
             ],
             const Divider(),
-            if (_subscribedCodes.contains('DEBUG')) ...[
+            const Text(
+              'AUDIO',
+              style: ToneTextStyles.settingsLabel,
+            ),
+            const SizedBox(height: 4),
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.record_voice_over, size: 18),
+              title: const Text('TTS Primer', style: TextStyle(fontSize: 13)),
+              subtitle: const Text(
+                '"Dispatch received" speech before alarm',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+              value: _ttsPrimerEnabled,
+              onChanged: (v) async {
+                setState(() => _ttsPrimerEnabled = v);
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('tts_primer_enabled', v);
+              },
+            ),
+            const Divider(),
+            if (_subscribedCodes.contains('DEBUG')) ..[
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
