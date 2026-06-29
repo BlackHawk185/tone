@@ -2,13 +2,11 @@ import 'dart:async';import 'dart:io' show Platform;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:tone/models/app_event.dart';
 import 'package:tone/models/user_status.dart';
 import 'package:tone/services/auth_service.dart';
 import 'package:tone/services/user_status_service.dart';
@@ -370,7 +368,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final user = AuthService.currentUser;
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -388,42 +385,35 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 ),
               ),
             ),
-            const SizedBox(height: 16),
-            if (user != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  user.displayName ?? user.email ?? 'User',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                ),
-              ),
-            // ── Custom Status ──
-            const Text(
-              'STATUS',
-              style: ToneTextStyles.settingsLabel,
-            ),
-            const SizedBox(height: 4),
-            StreamBuilder<UserStatus?>(
-              stream: UserStatusService.watchMyStatus(),
-              builder: (context, snap) {
-                final status = snap.data;
-                if (status != null) {
-                  return _ActiveStatusTile(status: status);
-                }
-                return ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.edit_note),
-                  title: const Text('Set Status'),
-                  subtitle: const Text(
-                    'Let the team know your availability',
-                    style: TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
+            const SizedBox(height: 12),
+            // ── Top action row ──
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildTopActionButton(
+                  icon: Icons.edit_note,
+                  label: 'Status',
                   onTap: () => _showSetStatusDialog(context),
-                );
-              },
+                ),
+                _buildTopActionButton(
+                  icon: Icons.share,
+                  label: 'Share',
+                  onTap: () => _showShareDialog(context),
+                ),
+                _buildTopActionButton(
+                  icon: Icons.logout,
+                  label: 'Sign Out',
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await AuthService.signOut();
+                    if (context.mounted) context.go('/login');
+                  },
+                ),
+              ],
             ),
+            const SizedBox(height: 16),
             const Divider(),
+            // ── Notifications ──
             const Text(
               'NOTIFICATIONS',
               style: ToneTextStyles.settingsLabel,
@@ -526,7 +516,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               },
             ),
             const Divider(),
-            if (_subscribedCodes.contains('DEBUG')) ..[
+            if (_subscribedCodes.contains('DEBUG')) ...[
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
@@ -562,33 +552,38 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   Duration(milliseconds: 200),
                 ],
               ),
-              const Divider(),
             ],
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.share),
-              title: const Text('Share App'),
-              onTap: () {
-                Navigator.pop(context);
-                _showShareDialog(context);
-              },
-            ),
-            const Divider(),
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
-              onTap: () async {
-                Navigator.pop(context);
-                await AuthService.signOut();
-                if (context.mounted) context.go('/login');
-              },
-            ),
-            const SizedBox(height: 8),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildTopActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade700,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: Colors.white, size: 24),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+        ],
       ),
     );
   }
