@@ -18,6 +18,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import java.io.File
 
 /**
  * Custom FirebaseMessagingService that wakes the device and brings the app
@@ -186,13 +187,16 @@ class DispatchMessagingService : FirebaseMessagingService() {
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
+        // Ensure ringtone is installed and get its URI
+        val thrumUri = getThrumRingtoneUri()
+
         data class Ch(
             val id: String, 
             val name: String, 
             val desc: String, 
             val bypassDnd: Boolean, 
             val vibration: LongArray,
-            val soundResId: Int  // R.raw.* resource ID
+            val soundUri: Uri?  // File URI or null if not available
         )
 
         val agencies = mapOf(
@@ -208,7 +212,7 @@ class DispatchMessagingService : FirebaseMessagingService() {
                 "Dispatch alerts for $label", 
                 true, 
                 urgentVibration,
-                R.raw.dispatch_thrum
+                thrumUri
             ))
             channels.add(Ch(
                 "priority_$code", 
@@ -216,7 +220,7 @@ class DispatchMessagingService : FirebaseMessagingService() {
                 "Priority traffic for $label", 
                 true, 
                 urgentVibration,
-                R.raw.dispatch_thrum
+                thrumUri
             ))
             channels.add(Ch(
                 "messages_$code", 
@@ -224,23 +228,42 @@ class DispatchMessagingService : FirebaseMessagingService() {
                 "Messages for $label", 
                 false, 
                 normalVibration,
-                R.raw.message_tone
+                Uri.parse("android.resource://${packageName}/${R.raw.message_tone}")
             ))
         }
 
         for (ch in channels) {
-            val soundUri = Uri.parse("android.resource://${packageName}/${ch.soundResId}")
             val channel = NotificationChannel(
                 ch.id, ch.name, NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = ch.desc
                 enableVibration(true)
                 vibrationPattern = ch.vibration
-                setSound(soundUri, alarmAudioAttrs)  // Set the sound for this channel
+                if (ch.soundUri != null) {
+                    setSound(ch.soundUri, alarmAudioAttrs)  // Set the sound for this channel
+                }
                 if (ch.bypassDnd) setBypassDnd(true)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun getThrumRingtoneUri(): Uri? {
+        return try {
+            val ringtoneFile = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_RINGTONES
+            )
+            val thrumFile = java.io.File(ringtoneFile, "dispatch_thrum.wav")
+            if (thrumFile.exists()) {
+                Uri.fromFile(thrumFile)
+            } else {
+                // Fallback to raw resource if file doesn't exist
+                Uri.parse("android.resource://${packageName}/${R.raw.dispatch_thrum}")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get thrum ringtone URI: ${e.message}")
+            null
         }
     }
 

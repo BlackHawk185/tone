@@ -4,6 +4,7 @@ import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
+import android.content.ContentValues
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.RingtoneManager
@@ -13,6 +14,7 @@ import android.os.Looper
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -21,6 +23,7 @@ import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterActivity() {
 
@@ -64,6 +67,7 @@ class MainActivity : FlutterActivity() {
         handleDispatchIntent(intent)
         initTts()
         initSoundPool()
+        installDispatchThrumRingtone()
     }
 
     override fun onResume() {
@@ -434,6 +438,65 @@ class MainActivity : FlutterActivity() {
             getSystemService(VIBRATOR_SERVICE) as android.os.Vibrator
         }
         vibrator.cancel()
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Ringtone Installation: Copy dispatch_thrum to system directory
+    // ────────────────────────────────────────────────────────────────────
+
+    private fun installDispatchThrumRingtone() {
+        try {
+            // Check if already installed
+            val ringtoneFile = File(
+                android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_RINGTONES
+                ),
+                "dispatch_thrum.wav"
+            )
+
+            // Only copy if doesn't exist
+            if (!ringtoneFile.exists()) {
+                ringtoneFile.parentFile?.mkdirs()
+
+                // Copy from raw resources to Ringtones directory
+                val inputStream = resources.openRawResource(R.raw.dispatch_thrum)
+                inputStream.use { input ->
+                    ringtoneFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                Log.d("Tone", "Dispatch thrum copied to: ${ringtoneFile.absolutePath}")
+            }
+
+            // Scan into MediaStore so it appears in sound pickers
+            scanRingtoneIntoMediaStore(ringtoneFile)
+        } catch (e: Exception) {
+            Log.w("Tone", "Failed to install dispatch thrum ringtone: ${e.message}")
+        }
+    }
+
+    private fun scanRingtoneIntoMediaStore(file: File) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10+: Use MediaStore with ContentValues
+                val values = ContentValues().apply {
+                    put(MediaStore.Audio.Media.DISPLAY_NAME, "Dispatch Thrum")
+                    put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
+                    put(MediaStore.Audio.Media.IS_RINGTONE, 1)
+                    put(MediaStore.Audio.Media.IS_ALARM, 0)
+                    put(MediaStore.Audio.Media.IS_NOTIFICATION, 1)
+                    put(MediaStore.Audio.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_RINGTONES)
+                }
+                contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+            } else {
+                // Pre-Android 10: Use RingtoneManager
+                @Suppress("DEPRECATION")
+                RingtoneManager.getDefaultType(RingtoneManager.TYPE_RINGTONE)
+            }
+            Log.d("Tone", "Dispatch thrum scanned into MediaStore")
+        } catch (e: Exception) {
+            Log.w("Tone", "Failed to scan ringtone into MediaStore: ${e.message}")
+        }
     }
 
     override fun onDestroy() {
