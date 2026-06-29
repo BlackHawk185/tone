@@ -1,8 +1,8 @@
 /**
- * One-time OAuth2 setup script — run locally to get a Gmail refresh token.
+ * One-time OAuth2 setup script — run locally to get the Tone service refresh token.
  *
  * Prerequisites:
- *   1. Set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .env (or env vars)
+ *   1. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env (or env vars)
  *   2. In GCP Console, add http://localhost:3000/oauth2callback as an
  *      Authorized Redirect URI on your OAuth2 client.
  *
@@ -10,19 +10,27 @@
  *   node setup-oauth.js
  *   Open the printed URL in your browser, sign in, grant access.
  *   The refresh token will be printed to the console.
+ *
+ * Notes:
+ *   - Existing Gmail-only tokens won't authorize Calendar API calls.
+ *   - Re-run this flow and replace the stored secret when adding Calendar sync.
  */
 require('dotenv').config();
 const http = require('http');
 const url = require('url');
 const { google } = require('googleapis');
+const { env } = require('./src/googleAuth');
 
-const CLIENT_ID     = process.env.GMAIL_CLIENT_ID;
-const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
+const CLIENT_ID     = env('GOOGLE_CLIENT_ID');
+const CLIENT_SECRET = env('GOOGLE_CLIENT_SECRET');
 const REDIRECT_URI  = 'http://localhost:3000/oauth2callback';
-const SCOPES        = ['https://www.googleapis.com/auth/gmail.modify'];
+const SCOPES        = [
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/calendar',
+];
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
-  console.error('Error: GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET must be set in .env');
+  console.error('Error: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in .env');
   process.exit(1);
 }
 
@@ -52,9 +60,9 @@ const server = http.createServer(async (req, res) => {
 
     console.log('\n✓ Refresh token obtained.\n');
     console.log('Run this to store it in Secret Manager:');
-    console.log(`\n  echo -n "${tokens.refresh_token}" | gcloud secrets create gmail-refresh-token --data-file=- --project tone-b66eb\n`);
+    console.log(`\n  echo -n "${tokens.refresh_token}" | gcloud secrets create google-refresh-token --data-file=- --project tone-b66eb\n`);
     console.log('Or if the secret already exists:');
-    console.log(`\n  echo -n "${tokens.refresh_token}" | gcloud secrets versions add gmail-refresh-token --data-file=- --project tone-b66eb\n`);
+    console.log(`\n  echo -n "${tokens.refresh_token}" | gcloud secrets versions add google-refresh-token --data-file=- --project tone-b66eb\n`);
   } catch (err) {
     console.error('Error exchanging code for tokens:', err.message);
     res.end('Error — check console.');

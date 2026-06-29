@@ -15,6 +15,7 @@ class UserStatusService {
     final expiresAt = DateTime.now().add(duration);
     await _db.collection('users').doc(user.uid).set({
       'displayName': user.displayName ?? user.email ?? 'Unknown',
+      if ((user.email ?? '').isNotEmpty) 'email': user.email,
       'customStatus': label,
       'statusExpiresAt': expiresAt.toIso8601String(),
     }, SetOptions(merge: true));
@@ -24,9 +25,15 @@ class UserStatusService {
   static Future<void> clearStatus() async {
     final user = AuthService.currentUser;
     if (user == null) return;
-    await _db.collection('users').doc(user.uid).update({
+    final docRef = _db.collection('users').doc(user.uid);
+    final snapshot = await docRef.get();
+    if ((snapshot.data()?['statusManagedBy'] as String?) == 'google_calendar') {
+      return;
+    }
+    await docRef.update({
       'customStatus': FieldValue.delete(),
       'statusExpiresAt': FieldValue.delete(),
+      'statusRole': FieldValue.delete(),
     });
   }
 

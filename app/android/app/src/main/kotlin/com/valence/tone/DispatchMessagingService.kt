@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.os.VibrationEffect
@@ -178,7 +180,20 @@ class DispatchMessagingService : FirebaseMessagingService() {
         val urgentVibration = longArrayOf(0, 400, 200, 400, 200, 800)
         val normalVibration = longArrayOf(0, 250, 150, 250)
 
-        data class Ch(val id: String, val name: String, val desc: String, val bypassDnd: Boolean, val vibration: LongArray)
+        // Audio attributes for notifications (ALARM stream for priority/dispatch)
+        val alarmAudioAttrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+
+        data class Ch(
+            val id: String, 
+            val name: String, 
+            val desc: String, 
+            val bypassDnd: Boolean, 
+            val vibration: LongArray,
+            val soundResId: Int  // R.raw.* resource ID
+        )
 
         val agencies = mapOf(
             "PBAMB" to "PB EMS",
@@ -187,18 +202,41 @@ class DispatchMessagingService : FirebaseMessagingService() {
 
         val channels = mutableListOf<Ch>()
         for ((code, label) in agencies) {
-            channels.add(Ch("dispatch_$code", "Dispatch \u2014 $label", "Dispatch alerts for $label", true, urgentVibration))
-            channels.add(Ch("priority_$code", "Priority \u2014 $label", "Priority traffic for $label", true, urgentVibration))
-            channels.add(Ch("messages_$code", "Messages \u2014 $label", "Messages for $label", false, normalVibration))
+            channels.add(Ch(
+                "dispatch_$code", 
+                "Dispatch \u2014 $label", 
+                "Dispatch alerts for $label", 
+                true, 
+                urgentVibration,
+                R.raw.dispatch_thrum
+            ))
+            channels.add(Ch(
+                "priority_$code", 
+                "Priority \u2014 $label", 
+                "Priority traffic for $label", 
+                true, 
+                urgentVibration,
+                R.raw.dispatch_thrum
+            ))
+            channels.add(Ch(
+                "messages_$code", 
+                "Messages \u2014 $label", 
+                "Messages for $label", 
+                false, 
+                normalVibration,
+                R.raw.message_tone
+            ))
         }
 
         for (ch in channels) {
+            val soundUri = Uri.parse("android.resource://${packageName}/${ch.soundResId}")
             val channel = NotificationChannel(
                 ch.id, ch.name, NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = ch.desc
                 enableVibration(true)
                 vibrationPattern = ch.vibration
+                setSound(soundUri, alarmAudioAttrs)  // Set the sound for this channel
                 if (ch.bypassDnd) setBypassDnd(true)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }

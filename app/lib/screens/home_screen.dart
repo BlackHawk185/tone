@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tone/models/app_event.dart';
-import 'package:tone/models/on_call_entry.dart';
 import 'package:tone/models/user_status.dart';
 import 'package:tone/services/auth_service.dart';
 import 'package:tone/services/incident_service.dart';
-import 'package:tone/services/on_call_service.dart';
 import 'package:tone/services/user_status_service.dart';
 import 'package:tone/widgets/event_card.dart';
 import 'package:tone/widgets/incident_card.dart';
@@ -46,166 +44,132 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => showMessageDialog(context),
-        backgroundColor: const Color(0xFFFF6D00),
-        child: const Icon(Icons.message, color: Colors.white),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton(
+            onPressed: () => SettingsMenu.showSettingsModal(context),
+            backgroundColor: Colors.grey.shade700,
+            heroTag: 'settings_fab',
+            child: const Icon(Icons.settings, color: Colors.white),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            onPressed: () => showMessageDialog(context),
+            backgroundColor: const Color(0xFFFF6D00),
+            heroTag: 'message_fab',
+            child: const Icon(Icons.message, color: Colors.white),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Stack(
           children: [
             Column(
               children: [
-                StreamBuilder<List<OnCallEntry>>(
-                  stream: OnCallService.watchOnCall(),
-                  builder: (context, onCallSnap) {
-                    return StreamBuilder<List<UserStatus>>(
-                      stream: UserStatusService.watchAllStatuses(),
-                      builder: (context, statusSnap) {
-                        final onCall = onCallSnap.data ?? [];
-                        final statuses = statusSnap.data ?? [];
-                        if (onCall.isEmpty && statuses.isEmpty) {
-                          return const SizedBox.shrink();
-                        }
-                        return Container(
-                          width: double.infinity,
-                          color: Colors.green.withAlpha(25),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: [
-                                // On-call entries
-                                ...onCall.map((e) {
-                                  final shiftEnd = DateTime.tryParse(e.shiftEnd);
-                                  return Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: Colors.teal.withAlpha(20),
-                                        border: Border.all(color: Colors.teal.withAlpha(60), width: 1),
-                                        borderRadius: const BorderRadius.all(Radius.circular(12)),
+                StreamBuilder<List<UserStatus>>(
+                  stream: UserStatusService.watchAllStatuses(),
+                  builder: (context, statusSnap) {
+                    final statuses = statusSnap.data ?? [];
+                    final onCall = statuses
+                        .where((s) => s.label.toUpperCase() == 'ON CALL')
+                        .toList();
+                    final otherStatuses = statuses
+                        .where((s) => s.label.toUpperCase() != 'ON CALL')
+                        .toList();
+                    if (onCall.isEmpty && otherStatuses.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    return Container(
+                      width: double.infinity,
+                      color: Colors.blue.withAlpha(20),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            ...onCall.map((s) {
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withAlpha(25),
+                                    border: Border.all(color: Colors.blue.withAlpha(80), width: 1),
+                                    borderRadius: const BorderRadius.all(Radius.circular(10)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(roleIcon(s.role), size: 16, color: Colors.blue.shade400),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        s.displayName,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 13,
+                                          color: Colors.blue.shade100,
+                                        ),
                                       ),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(roleIcon(e.role), size: 14, color: Colors.teal),
-                                              const SizedBox(width: 6),
-                                              Text.rich(
-                                                TextSpan(
-                                                  children: [
-                                                    TextSpan(
-                                                      text: e.displayName,
-                                                      style: TextStyle(
-                                                        fontWeight: FontWeight.w700,
-                                                        fontSize: 13,
-                                                        color: Colors.green.shade200,
-                                                      ),
-                                                    ),
-                                                    TextSpan(
-                                                      text: ' - on call',
-                                                      style: TextStyle(
-                                                        fontWeight: FontWeight.w500,
-                                                        fontSize: 11,
-                                                        color: Colors.green.shade600,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 3),
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              if (e.role.isNotEmpty)
-                                                Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.teal.withAlpha(40),
-                                                    borderRadius: const BorderRadius.all(Radius.circular(6)),
-                                                  ),
-                                                  child: Text(
-                                                    e.role.toUpperCase(),
-                                                    style: TextStyle(
-                                                      fontWeight: FontWeight.w700,
-                                                      fontSize: 8,
-                                                      color: Colors.teal,
-                                                      letterSpacing: 0.3,
-                                                    ),
-                                                  ),
-                                                ),
-                                              if (e.role.isNotEmpty && shiftEnd != null)
-                                                const SizedBox(width: 5),
-                                              if (shiftEnd != null)
-                                                ShiftCountdown(shiftEnd: shiftEnd),
-                                            ],
-                                          ),
-                                        ],
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'On Call',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w500,
+                                          fontSize: 11,
+                                          color: Colors.blue.shade300,
+                                        ),
                                       ),
-                                    ),
-                                  );
-                                }),
-                                // Custom status entries
-                                ...statuses.map((s) {
-                                  return Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: Colors.amber.withAlpha(20),
-                                        border: Border.all(color: Colors.amber.withAlpha(60), width: 1),
-                                        borderRadius: const BorderRadius.all(Radius.circular(12)),
+                                      const SizedBox(width: 12),
+                                      ShiftCountdown(shiftEnd: s.expiresAt, color: Colors.blue.shade400),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }),
+                            ...otherStatuses.map((s) {
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.withAlpha(20),
+                                    border: Border.all(color: Colors.amber.withAlpha(60), width: 1),
+                                    borderRadius: const BorderRadius.all(Radius.circular(10)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(statusIcon(s.label), size: 16, color: Colors.amber.shade600),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        s.displayName,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 13,
+                                          color: Colors.amber.shade200,
+                                        ),
                                       ),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(statusIcon(s.label), size: 14, color: Colors.amber.shade600),
-                                              const SizedBox(width: 6),
-                                              Text.rich(
-                                                TextSpan(
-                                                  children: [
-                                                    TextSpan(
-                                                      text: s.displayName,
-                                                      style: TextStyle(
-                                                        fontWeight: FontWeight.w700,
-                                                        fontSize: 13,
-                                                        color: Colors.amber.shade200,
-                                                      ),
-                                                    ),
-                                                    TextSpan(
-                                                      text: ' - ${s.label}',
-                                                      style: TextStyle(
-                                                        fontWeight: FontWeight.w600,
-                                                        fontSize: 11,
-                                                        color: Colors.amber.shade600,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 3),
-                                          ShiftCountdown(shiftEnd: s.expiresAt, color: Colors.amber.shade600),
-                                        ],
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        s.label,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 11,
+                                          color: Colors.amber.shade600,
+                                        ),
                                       ),
-                                    ),
-                                  );
-                                }),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
+                                      const SizedBox(width: 12),
+                                      ShiftCountdown(shiftEnd: s.expiresAt, color: Colors.amber.shade600),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
                     );
                   },
                 ),
@@ -280,12 +244,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ],
-            ),
-            // Settings button
-            Positioned(
-              top: 4,
-              right: 4,
-              child: const SettingsMenu(),
             ),
           ],
         ),

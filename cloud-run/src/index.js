@@ -1,11 +1,120 @@
 require('dotenv').config();
 const http = require('http');
 const { parseDispatchEmail } = require('./emailParser');
-const { writeIncident } = require('./firestore');
+const {
+  getCalendarSyncState,
+  mergeCalendarSyncState,
+  writeIncident,
+  writeCalendarStatusProjection,
+  writeCalendarEvent,
+} = require('./firestore');
+const {
+  buildActiveShiftEntries,
+  buildCalendarEvents,
+  getCalendarWebhookPath,
+  registerCalendarWatch,
+  stopCalendarWatch,
+  validateAndDeclineInvalidShifts,
+} = require('./calendar');
 const { registerWatch, fetchNewMessages, markAsRead } = require('./gmail');
 
 const PORT = process.env.PORT || 8080;
 const PUSH_SECRET = process.env.PUSH_SECRET || '';
+const CALENDAR_WEBHOOK_PATH = PUSH_SECRET ? getCalendarWebhookPath() : '';
+
+let calendarRefreshInFlight = null;
+
+function headerValue(headers, name) {
+  return String(headers[name] || '').trim();
+}
+
+function readCalendarWebhookHeaders(req) {
+  return {
+    channelId: headerValue(req.headers, 'x-goog-channel-id'),
+    channelToken: headerValue(req.headers, 'x-goog-channel-token'),
+    expiration: headerValue(req.headers, 'x-goog-channel-expiration'),
+    resourceId: headerValue(req.headers, 'x-goog-resource-id'),
+    resourceState: headerValue(req.headers, 'x-goog-resource-state'),
+    resourceUri: headerValue(req.headers, 'x-goog-resource-uri'),
+    messageNumber: headerValue(req.headers, 'x-goog-message-number'),
+  };
+}
+
+function queueCalendarRefresh(reason, extraState = {}) {
+  if (calendarRefreshInFlight) {
+    console.log(`[Calendar] Refresh already running, coalescing ${reason}.`);
+    return calendarRefreshInFlight;
+  }
+
+  calendarRefreshInFlight = (async () => {
+    try {
+      // Process both shifts and events in parallel
+      const [users, events] = await Promise.all([
+        buildActiveShiftEntries(),
+        buildCalendarEvents(),
+      ]);
+
+      // Write shifts to user status projections
+      await writeCalendarStatusProjection(users, {
+        source: 'google_calendar',
+        reason,
+        syncedAt: new Date().toISOString(),
+      });
+
+      // Write events to feed collection
+      for (const event of events) {
+        await writeCalendarEvent(event);
+      }
+
+      await mergeCalendarSyncState({
+        ...extraState,
+        activeUsers: users.length,
+        activeEvents: events.length,
+        lastRefreshAt: new Date().toISOString(),
+        lastRefreshReason: reason,
+        lastRefreshError: null,
+        lastRefreshErrorAt: null,
+      });
+      console.log(`[Calendar] Projected ${users.length} active shift(s) and ${events.length} event(s) (${reason}).`);
+      return { users, events };
+    } catch (err) {
+      await mergeCalendarSyncState({
+        ...extraState,
+        lastRefreshAt: new Date().toISOString(),
+        lastRefreshReason: reason,
+        lastRefreshError: err.message,
+        lastRefreshErrorAt: new Date().toISOString(),
+      });
+      throw err;
+    } finally {
+      calendarRefreshInFlight = null;
+    }
+  })();
+
+  return calendarRefreshInFlight;
+}
+
+async function renewCalendarWatch() {
+  const currentState = await getCalendarSyncState();
+  if (currentState?.watch?.channelId && currentState?.watch?.resourceId) {
+    try {
+      await stopCalendarWatch(currentState.watch);
+      console.log(`[Calendar] Stopped previous watch ${currentState.watch.channelId}.`);
+    } catch (err) {
+      console.warn(`[Calendar] Failed to stop previous watch: ${err.message}`);
+    }
+  }
+
+  const watch = await registerCalendarWatch();
+  await mergeCalendarSyncState({
+    watch,
+    lastWatchRenewalAt: new Date().toISOString(),
+    lastWatchRenewalError: null,
+  });
+  console.log(`[Calendar] Watch registered. expires=${watch.expiration || 'unknown'}`);
+  await queueCalendarRefresh('calendar_watch_renewal');
+  return watch;
+}
 
 /**
  * Convert raw MIME email source to clean plain text for parsing.
@@ -95,11 +204,71 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (CALENDAR_WEBHOOK_PATH && req.method === 'POST' && req.url === CALENDAR_WEBHOOK_PATH) {
+    const headers = readCalendarWebhookHeaders(req);
+    req.on('data', () => {});
+    req.on('end', () => {
+      res.writeHead(204);
+      res.end();
+
+      if (headers.channelToken && headers.channelToken !== PUSH_SECRET) {
+        console.warn('[Calendar] Ignoring webhook with unexpected channel token.');
+        return;
+      }
+
+      const syncState = {
+        lastWebhookAt: new Date().toISOString(),
+        lastWebhookChannelId: headers.channelId || null,
+        lastWebhookMessageNumber: headers.messageNumber || null,
+        lastWebhookResourceId: headers.resourceId || null,
+        lastWebhookResourceState: headers.resourceState || null,
+        lastWebhookResourceUri: headers.resourceUri || null,
+        lastWebhookExpiration: headers.expiration || null,
+      };
+
+      mergeCalendarSyncState(syncState).catch((err) => {
+        console.error('[Calendar] Failed to persist webhook metadata:', err.message);
+      });
+
+      if (!headers.resourceState || headers.resourceState === 'sync' || headers.resourceState === 'exists') {
+        // Validate and decline any invalid shifts (past-dated invites)
+        validateAndDeclineInvalidShifts()
+          .catch((err) => console.error('[Calendar] Validation error:', err.message));
+
+        // Then refresh active shifts and events
+        queueCalendarRefresh(`calendar_webhook:${headers.resourceState || 'unknown'}`, syncState)
+          .catch((err) => console.error('[Calendar] Refresh error:', err.message));
+      }
+    });
+    return;
+  }
+
   // Watch renewal — called by Cloud Scheduler every 6 days
   if (req.method === 'POST' && req.url === '/renew-watch') {
     res.writeHead(200);
     res.end();
     registerWatch().catch(err => console.error('[Watch] Renewal error:', err.message));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/renew-calendar-watch') {
+    res.writeHead(200);
+    res.end();
+    renewCalendarWatch().catch(async (err) => {
+      console.error('[Calendar] Watch renewal error:', err.message);
+      await mergeCalendarSyncState({
+        lastWatchRenewalAt: new Date().toISOString(),
+        lastWatchRenewalError: err.message,
+      });
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/refresh-calendar-shifts') {
+    res.writeHead(202);
+    res.end();
+    queueCalendarRefresh('calendar_scheduler_reconcile')
+      .catch((err) => console.error('[Calendar] Scheduled reconcile error:', err.message));
     return;
   }
 

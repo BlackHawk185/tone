@@ -15,7 +15,6 @@ import 'package:tone/widgets/info_grid.dart';
 import 'package:tone/widgets/info_tile.dart';
 import 'package:tone/widgets/live_elapsed.dart';
 import 'package:tone/widgets/role_groups.dart';
-import 'package:tone/widgets/settings_menu.dart';
 import 'package:tone/widgets/swipe_to_respond.dart';
 
 class IncidentScreen extends StatelessWidget {
@@ -27,9 +26,6 @@ class IncidentScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Incident'),
-        actions: const [
-          SettingsMenu(),
-        ],
       ),
       body: StreamBuilder<Incident?>(
         stream: IncidentService.watchIncident(incidentId),

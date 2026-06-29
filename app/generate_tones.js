@@ -20,6 +20,69 @@ const SAMPLE_RATE = 44100;
 const BIT_DEPTH = 16;
 const BYTES_PER_SAMPLE = BIT_DEPTH / 8;
 
+// ────────────────────────────────────────────────────────────────────────
+// Helper: Concatenate WAV buffers (combines audio data from multiple files)
+// ────────────────────────────────────────────────────────────────────────
+function concatenateWavs(wavBuffers) {
+  // Sum up total data size (skip RIFF header from all but first)
+  let totalDataSize = 0;
+  for (let i = 0; i < wavBuffers.length; i++) {
+    // Read data chunk size from each WAV (at offset 40)
+    const dataSize = wavBuffers[i].readUInt32LE(40);
+    totalDataSize += dataSize;
+  }
+
+  const newBuffer = Buffer.alloc(44 + totalDataSize);
+
+  // Copy header from first WAV
+  wavBuffers[0].copy(newBuffer, 0, 0, 44);
+
+  // Update file size in header
+  newBuffer.writeUInt32LE(36 + totalDataSize, 4);
+  newBuffer.writeUInt32LE(totalDataSize, 40);
+
+  // Copy all audio data, concatenated
+  let offset = 44;
+  for (const wav of wavBuffers) {
+    const dataSize = wav.readUInt32LE(40);
+    wav.copy(newBuffer, offset, 44, 44 + dataSize);
+    offset += dataSize;
+  }
+
+  return newBuffer;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Helper: Generate silence (blank WAV segment)
+// ────────────────────────────────────────────────────────────────────────
+function generateSilence(duration) {
+  const numSamples = Math.floor(SAMPLE_RATE * duration);
+  const dataSize = numSamples * BYTES_PER_SAMPLE;
+  const buffer = Buffer.alloc(44 + dataSize);
+
+  // Copy header structure
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(SAMPLE_RATE, 24);
+  buffer.writeUInt32LE(SAMPLE_RATE * BYTES_PER_SAMPLE, 28);
+  buffer.writeUInt16LE(BYTES_PER_SAMPLE, 32);
+  buffer.writeUInt16LE(BIT_DEPTH, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataSize, 40);
+
+  // All samples are zero (silence)
+  for (let i = 0; i < numSamples; i++) {
+    buffer.writeInt16LE(0, 44 + i * BYTES_PER_SAMPLE);
+  }
+
+  return buffer;
+}
+
 function generateWav(options) {
   const {
     duration,
@@ -118,24 +181,6 @@ function generateWav(options) {
 // ────────────────────────────────────────────────────────────────────────
 
 const tones = {
-  // DISPATCH: Rich two-tone chord with gentle rise + tremolo.
-  // 440 Hz (A4) + 554 Hz (C#5) = A major third — warm, resolved, not tense.
-  // Tremolo at 4 Hz gives it a living, breathing quality.
-  // Assertive 3s duration — long enough to register even from sleep.
-  dispatch_tone: generateWav({
-    duration: 3.0,
-    attackTime: 0.2,
-    releaseTime: 0.7,
-    volume: 0.9,
-    tremolo: { rate: 4, depth: 0.25 },
-    frequencies: [
-      { freq: 440, bend: 494, amplitude: 1.0 },    // A4 rises to B4
-      { freq: 554, bend: 587, amplitude: 0.7 },    // C#5 rises to D5
-      { freq: 880, amplitude: 0.2 },                // octave overtone for brightness
-      { freq: 660, bend: 700, amplitude: 0.3 },     // 5th for fullness
-    ],
-  }),
-
   // PRIORITY: Steady, clear tone with body. Not urgent, but present.
   // 523 Hz (C5) + harmonics. Subtle tremolo for warmth.
   priority_tone: generateWav({
@@ -167,25 +212,29 @@ const tones = {
     ],
   }),
 
-  // THRUM: Single low swell pulse for dispatch alert sequence.
-  // 800ms, long fade-in (600ms attack). Played in 3 groups of 3
-  // programmatically with amplitude-ramped vibration.
-  // 110 Hz fundamental (A2) — as low as practical for phone speakers.
-  // Missing-fundamental trick: harmonics at 220/330/440 carry energy;
-  // brain perceives deep ~110 Hz.
-  dispatch_thrum: generateWav({
-    duration: 0.8,
-    attackTime: 0.6,               // long swell — this IS the tone
-    releaseTime: 0.1,              // quick cutoff — crisp end
-    volume: 1.0,
-    tremolo: { rate: 60, depth: 0.04 },
-    compress: 4,
-    frequencies: [
-      { freq: 175, amplitude: 1.0 },            // single base tone — no beating
-      { freq: 280, amplitude: 0.5 },             // detuned ~1.6x — inharmonic, robotic
-      { freq: 350, amplitude: 0.2 },             // ~2x but sharp — metallic edge
-    ],
-  }),
+  // THRUM: Loopable sequence for dispatch alert.
+  // Pre-built pattern: 3 thrums (800ms each) + 250ms gaps + 1000ms pause = ~4.3s loop.
+  // Eliminates need for procedural scheduling; plays seamlessly via notification channel.
+  // Each thrum: 600ms attack (long swell) + 100ms release (crisp cutoff).
+  // Frequencies: 175 Hz fundamental (deep, phone-speaker optimized) + inharmonic overtones.
+  dispatch_thrum: (() => {
+    const singleThrum = generateWav({
+      duration: 0.8,
+      attackTime: 0.6,
+      releaseTime: 0.1,
+      volume: 1.0,
+      tremolo: { rate: 60, depth: 0.04 },
+      compress: 4,
+      frequencies: [
+        { freq: 175, amplitude: 1.0 },
+        { freq: 280, amplitude: 0.5 },
+        { freq: 350, amplitude: 0.2 },
+      ],
+    });
+    const gap = generateSilence(0.25);
+    const finalPause = generateSilence(1.0);
+    return concatenateWavs([singleThrum, gap, singleThrum, gap, singleThrum, gap, finalPause]);
+  })(),
 };
 
 // ────────────────────────────────────────────────────────────────────────

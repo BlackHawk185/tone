@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tone/models/app_event.dart';
-import 'package:tone/utils/map_launcher.dart';
 import 'package:tone/widgets/info_tile.dart';
 import 'package:tone/widgets/live_elapsed.dart';
+import 'package:tone/widgets/location_tile.dart';
 
 class EventCard extends StatefulWidget {
   final CalendarEvent event;
@@ -151,14 +151,12 @@ class _EventCardState extends State<EventCard>
                             LiveElapsed(time: event.time),
                             if (event.location != null) ...[
                               const SizedBox(width: 8),
-                              InfoTile(
-                                icon: Icons.location_on,
-                                label: 'LOCATION',
-                                value: event.location!,
+                              LocationTile(
+                                locationText: event.location!,
+                                lat: event.lat,
+                                lng: event.lng,
                                 color: isDone ? Colors.grey : Colors.orange,
-                                onTap: event.lat != null && event.lng != null
-                                    ? () => openMap(event.lat!, event.lng!)
-                                    : null,
+                                label: 'LOCATION',
                               ),
                             ],
                             if (event.attendees.isNotEmpty) ...[

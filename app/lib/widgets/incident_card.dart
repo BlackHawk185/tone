@@ -9,6 +9,7 @@ import 'package:tone/utils/map_launcher.dart';
 import 'package:tone/widgets/bounce_on_change.dart';
 import 'package:tone/widgets/info_tile.dart';
 import 'package:tone/widgets/live_elapsed.dart';
+import 'package:tone/widgets/location_tile.dart';
 import 'package:tone/widgets/pulsing_dot.dart';
 
 class IncidentCard extends StatefulWidget {
@@ -283,19 +284,12 @@ class _IncidentCardState extends State<IncidentCard>
                                         );
                                       },
                                     ),
-                                  InfoTile(
-                                    icon: Icons.location_on,
-                                    label: 'ADDRESS',
-                                    value: incident.address,
+                                  LocationTile(
+                                    locationText: incident.address,
+                                    lat: incident.lat,
+                                    lng: incident.lng,
                                     color: tileColor(Colors.orange),
-                                    onTap:
-                                        incident.lat != null &&
-                                            incident.lng != null
-                                        ? () => openMap(
-                                            incident.lat!,
-                                            incident.lng!,
-                                          )
-                                        : null,
+                                    label: 'ADDRESS',
                                   ),
                                   const SizedBox(width: 8),
                                   LiveElapsed(

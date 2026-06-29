@@ -1,15 +1,12 @@
 const { google } = require('googleapis');
+const { getGoogleOAuthClient } = require('./googleAuth');
 
 let _gmail = null;
 
 function getGmail() {
   if (_gmail) return _gmail;
-  const client = new google.auth.OAuth2(
-    (process.env.GMAIL_CLIENT_ID || '').trim(),
-    (process.env.GMAIL_CLIENT_SECRET || '').trim(),
-  );
-  client.setCredentials({
-    refresh_token: (process.env.GMAIL_REFRESH_TOKEN || '').trim(),
+  const client = getGoogleOAuthClient({
+    errorContext: 'Google OAuth credentials are not configured',
   });
   _gmail = google.gmail({ version: 'v1', auth: client });
   return _gmail;

@@ -41,7 +41,6 @@ async function run() {
         role: 'PCP',
         shiftStart: shiftStart.toISOString(),
         shiftEnd: shiftEnd.toISOString(),
-        wiwUserId: 101,
       },
       {
         uid: 'demo-user-2',
@@ -49,7 +48,6 @@ async function run() {
         role: 'Driver',
         shiftStart: shiftStart.toISOString(),
         shiftEnd: shiftEnd.toISOString(),
-        wiwUserId: 102,
       },
     ],
     lastSynced: now,
